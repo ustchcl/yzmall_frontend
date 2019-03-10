@@ -40,10 +40,10 @@ main = HA.runHalogenAff do
   initialHash <- liftEffect $ getHash
 
   -- 尝试登陆
-  let 
-    loginFields = { phone: "123", password: "123" }
-    method = Post $ Just $ encodeJson loginFields
-    requestOps = { endpoint : Login, method: method }
+  -- let 
+  --   loginFields = { phone: "123", password: "123" }
+  --   method = Post $ Just $ encodeJson loginFields
+  --   requestOps = { endpoint : Login, method: method }
 
   -- liftEffect loginTest >>= traverse_ \op -> do
   --   res <- liftAff $ request $ defaultRequest baseUrl op
@@ -51,16 +51,16 @@ main = HA.runHalogenAff do
   --   liftEffect $ Ref.write (hush account) currentAccount
   --   pure unit
 
-  _ <- liftAff $ request $ defaultRequestForm baseUrl requestOps
+  -- _ <- liftAff $ request $ defaultRequestForm baseUrl requestOps
   
-  liftEffect loginTest >>= traverse_ \op -> do
-    res <- liftAff $ request $ defaultRequest baseUrl op
-    let u = decodeAccount =<< lmap printResponseFormatError res.body
-    liftEffect $ testLog u
+  -- liftEffect loginTest >>= traverse_ \op -> do
+  --   res <- liftAff $ request $ defaultRequest baseUrl op
+  --   let u = decodeAccount =<< lmap printResponseFormatError res.body
+  --   liftEffect $ testLog u
     -- liftEffect $ log "request"
     -- liftEffect $ log $ show (_.phone <$> (hush u))
     -- liftEffect $ Ref.write (hush u) currentAccount
-    pure unit
+    -- pure unit
   -- >>= \json -> do
   --   account <- decode decodeAccount (Just json)
   --   liftEffect $ Ref.write account currentAccount

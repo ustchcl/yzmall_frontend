@@ -21,4 +21,43 @@ rectPng = "./image/rect.png"
 logo :: String 
 logo = "http://xiangqingkeji.com/img/logo3.png"
 
+-- menu icons
+regularIcon :: String
+regularIcon = "http://xiangqingkeji.com/images/btn_footer02.png"
+regularIconM :: String
+regularIconM = "http://xiangqingkeji.com/images/btn_footer02m.png"
 
+specialIcon :: String
+specialIcon = "http://xiangqingkeji.com/images/btn_footer03.png"
+specialIconM :: String
+specialIconM = "http://xiangqingkeji.com/images/btn_footer03m.png"
+
+recordIcon :: String
+recordIcon = "http://xiangqingkeji.com/images/btn_footer04.png"
+recordIconM :: String
+recordIconM = "http://xiangqingkeji.com/images/btn_footer04m.png"
+
+accountIcon :: String
+accountIcon = "http://xiangqingkeji.com/images/btn_footer05.png"
+accountIconM :: String
+accountIconM = "http://xiangqingkeji.com/images/btn_footer05m.png"
+
+
+-- | Main Page res
+bgBanner = "./image/bg_banner.png"
+bgCommodity = "./image/bg_commodity.png"
+bgFooter = "./image/bg_footer.png"
+bgHeader = "./image/bg_header.png"
+bgInfoTitle = "./image/bg_info_title.png"
+bgTuiGuang = "./image/bg_tuiguang.png"
+btnBuy = "./image/btn_buy.png"
+iconWdds = "./image/icon_wdds.png"
+iconWdfx = "./image/icon_wdfx.png"
+iconWdtg = "./image/icon_wdtg.png"
+logoTitle = "./image/logo_title.png"
+logoNavbar = "./image/logo_navbar.png"
+
+-- | commodityInfo
+c105Info = "http://xiangqingkeji.com/systema/kindeditor-4.1.10/attached/image/20190309/20190309185705_26138.jpg"
+
+sharePng = "http://xiangqingkeji.com/poster/1770724.jpg"

@@ -1,0 +1,63 @@
+Arguments: 
+  C:\Program Files\nodejs\node.exe C:\Users\hong\AppData\Roaming\npm\node_modules\yarn\bin\yarn.js install
+
+PATH: 
+  D:\software\cmder1.3.2\bin;D:\software\cmder1.3.2\vendor\conemu-maximus5\ConEmu\Scripts;D:\software\cmder1.3.2\vendor\conemu-maximus5;D:\software\cmder1.3.2\vendor\conemu-maximus5\ConEmu;C:\Program Files\Haskell\bin;C:\Program Files\Haskell Platform\8.4.3\lib\extralibs\bin;C:\Program Files\Haskell Platform\8.4.3\bin;C:\ProgramData\Oracle\Java\javapath;c:\program files (x86)\graphicsmagick-1.3.25-q16;C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0\;C:\Program Files\TortoiseSVN\bin;C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common;C:\Program Files\TortoiseGit\bin;C:\Program Files (x86)\Calibre2\;c:\Program Files (x86)\Microsoft SQL Server\100\Tools\Binn\;c:\Program Files (x86)\Microsoft SQL Server\100\DTS\Binn\;C:\CTEX\UserData\miktex\bin;C:\CTEX\MiKTeX\miktex\bin;C:\CTEX\CTeX;C:\CTEX\CTeX\Packages\ctex\bin;C:\CTEX\CTeX;C:\CTEX\CTeX\Packages\cct\bin;C:\CTEX\CTeX;C:\CTEX\CTeX\Packages\ty\bin;C:\CTEX\Ghostscript\gs9.18\bin;C:\CTEX\GSview\gsview;C:\CTEX\WinEdt;C:\Program Files\nodejs\;C:\Program Files\Geth;C:\Program Files (x86)\sbt\bin;C:\Program Files (x86)\scala\bin;C:\Program Files\Haskell Platform\8.4.3\mingw\bin;C:\Program Files (x86)\Elm\0.19\bin;C:\Python27\Scripts;C:\Python27;C:\Program Files\PostgreSQL\11\bin;,;C:\Program Files\Docker Toolbox;,;D:\code\home\emacs-26.1-x86_64\bin;.;C:\Users\hong\AppData\Roaming\cabal\bin;D:\code\home\.sdkbox\bin;C:\Users\hong\AppData\Roaming\local\bin;C:\Users\hong\AppData\Roaming\??????\5.2.0.41;C:\Users\hong\AppData\Roaming\npm;C:\Program Files\Egret\EgretEngine\win\bin;C:\Python27;C:\Python27\Scripts;C:\Users\hong\AppData\Local\atom\bin;,C:\Program Files\Egret\EgretEngine\win\egret\tools\lib\typescript-plus\bin;C:\Program Files\7-Zip;C:\Program Files (x86)\Egret\Egret Wing 3\bin;D:\softs\adb;C:\Program Files\Microsoft VS Code\bin;,;C:/Program Files/CodeAndWeb/TexturePacker/bin;C:\Users\hong\AppData\Local\Programs\Microsoft VS Code\bin;,;C:\Program Files\Git\bin;C:\Program Files (x86)\sbt\bin;C:\Users\hong\AppData\Local\Programs\Microsoft VS Code Insiders\bin;C:\Program Files\Docker Toolbox;C:\Users\hong\AppData\Local\hyper\app-2.1.2\resources\bin;C:\Program Files\Git\usr\bin;C:\Program Files\Git\usr\share\vim\vim74;D:\software\cmder1.3.2\
+
+Yarn version: 
+  1.9.4
+
+Node version: 
+  8.11.1
+
+Platform: 
+  win32 x64
+
+Trace: 
+  Error: ENOENT: no such file or directory, copyfile 'C:\Users\hong\AppData\Local\Yarn\Cache\v2\npm-inherits-2.0.1-b17d08d326b4423e568eff719f91b0b1cbdf69f1\inherits_browser.js' -> 'D:\code\purescript\yzmall_frontend\node_modules\assert\node_modules\inherits\inherits_browser.js'
+
+npm manifest: 
+  {
+    "name": "purescript-halogen-realworld",
+    "version": "1.0.0",
+    "description": "An exemplary real-world application demonstrating PureScript and the Halogen framework",
+    "scripts": {
+      "postinstall": "bower install",
+      "build": "pulp build --to dist/app.js && open dist/index.html",
+      "watch": "pulp -w build --to dist/app.js",
+      "watch-fast": "webpack --mode=development --entry ./entry.js --output-path ./dist --output-filename app.js --progress --watch",
+      "build-dev": "pulp build",
+      "watch-dev": "pulp -w build",
+      "build-serve": "pulp --then 'parcel build dist/index.html && http-server dist' build --to dist/app.js",
+      "watch-serve": "pulp -w --then 'parcel build dist/index.html && http-server dist' build --to dist/app.js"
+    },
+    "keywords": [
+      "purescript",
+      "halogen"
+    ],
+    "author": "hong",
+    "license": "MIT",
+    "devDependencies": {
+      "bower": "^1.8.4",
+      "parcel-bundler": "^1.11.0",
+      "pulp": "12.3.0",
+      "purescript": "0.12.1",
+      "purescript-psa": "^0.7.2",
+      "webpack": "^4.16.2",
+      "webpack-cli": "^3.1.0"
+    },
+    "dependencies": {
+      "decimal.js": "^10.0.2",
+      "http-server": "^0.11.1",
+      "jquery": "^3.3.1",
+      "marked": "^0.5.2",
+      "popper.js": "^1.14.7"
+    },
+    "__npminstall_done": false
+  }
+
+yarn manifest: 
+  No manifest
+
+Lockfile: 
+  No lockfile

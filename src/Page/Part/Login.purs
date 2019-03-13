@@ -8,8 +8,95 @@ import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import String (logo)
+import Yzmall.Page.Utils (InputGroupConfig, renderInputGroup)
 import Yzmall.Utils (cls, renderModal, style, (->>))
 
+
+registerFields :: Array InputGroupConfig
+registerFields = 
+  [ { id : "inviter"
+    , icon : "fa fa-user-plus"
+    , placeholder: "输入邀请者手机号"
+    , required : false
+    }
+  , { id : "nickname"
+    , icon : "fa fa-user-alt"
+    , placeholder: "输入昵称"
+    , required : true
+    }
+  , { id : "phone"
+    , icon : "fa fa-mobile-alt"
+    , placeholder: "输入手机号"
+    , required : true
+    }
+  , { id : "validate-code"
+    , icon : "fa fa-comments"
+    , placeholder: "输入验证码"
+    , required : true
+    }
+  , { id : "password1"
+    , icon : "fa fa-unlock"
+    , placeholder: "输入密码"
+    , required : true
+    }
+  , { id : "password2"
+    , icon : "fa fa-unlock-alt"
+    , placeholder: "确认密码"
+    , required : true
+    }
+  ]
+
+renderRegisterModal :: ∀ p i. H.HTML p i
+renderRegisterModal = 
+  renderModal "registerModal" "注册" footer body
+  where
+    footer = 
+      [ HH.div
+        [ cls $ dFlex <> ml3 <> floatLeft]
+        [ HH.div_ [ HH.text "已有账号?现在" ]
+        , HH.a
+          [ HP.href "#"
+          , "data-dismiss" ->> "modal"
+          , "data-toggle" ->> "modal"
+          , "data-target" ->> "#loginModal"]
+          [ HH.text "去登录" ]
+        ]
+      
+    , HH.button
+      [ cls $ btn <> btnDanger <> btnBlock <> w25 <> mr3 <> mlAuto
+      , "type" ->> "button"
+      ]
+      [ HH.text "下一步"]
+    ]
+
+    body = 
+      [ HH.div
+      [cls $ dFlex <> justifyContentCenter <> alignItemsCenter] 
+      [ HH.img
+        [ style "max-height: 150px"
+        , HP.src logo ]
+      ]
+    , HH.form_ 
+      [ HH.div
+        [ cls formGroup ]
+        (renderInputGroup <$> registerFields)
+      ]
+    ]
+
+
+loginFields :: Array InputGroupConfig
+loginFields = 
+  [ { id : "phone"
+    , icon : "fas fa-mobile-alt"
+    , placeholder: "输入手机号"
+    , required : true
+    }
+  , { id : "password"
+    , icon : "fas fa-unlock-alt"
+    , placeholder: "输入密码（6 ~ 16位）"
+    , required : true
+    }
+  ]
 renderLoginModal :: ∀ p i. H.HTML p i 
 renderLoginModal = 
   renderModal "loginModal" "登录" footer body
@@ -18,6 +105,9 @@ renderLoginModal =
   footer =
     [ HH.a
       [ cls $ ml3 <> floatLeft
+      , "data-toggle" ->> "modal"
+      , "data-target" ->> "#registerModal"
+      , "data-dismiss" ->> "modal"
       , HP.href "#"]
       [ HH.text "立即注册" ]
       
@@ -32,65 +122,13 @@ renderLoginModal =
     [ HH.div
       [cls $ dFlex <> justifyContentCenter <> alignItemsCenter] 
       [ HH.img
-        [ style "max-height: 200px"
+        [ style "max-height: 150px"
         , HP.src logo ]
       ]
     , HH.form_ 
       [ HH.div
         [ cls formGroup ]
-        [ HH.div
-          [ cls $ inputGroup <> mb2 <> px3]
-          [ HH.div
-            [ cls inputGroupPrepend ]
-            [ HH.span
-              [ "id" ->> "phonePrepend" 
-              , cls $ inputGroupText <> dFlex <> justifyContentCenter
-              , style "width: 50px"
-              ]
-              [ HH.i 
-                [ "class" ->> "fas fa-mobile-alt" ]
-                []
-              ]
-            ]
-          , HH.input 
-            [ "type" ->> "text"
-            , cls $ formControl <> isValid
-            , "id" ->> "validationPhone"
-            , HP.placeholder "输入手机号"
-            , "value" ->> ""
-            , HP.required true
-            ]
-          ]
-        , HH.div 
-          [ cls invalidFeedback ]
-          [ HH.text "" ]
-        , HH.div 
-          [ cls $ inputGroup <> px3]
-          [ HH.div
-            [ cls $ inputGroupPrepend ]
-            [ HH.span
-              [ "id" ->> "passwordPrepend" 
-              , cls $ inputGroupText <> dFlex <> justifyContentCenter
-              , style "width: 50px"
-              ]
-              [ HH.i 
-                [ "class" ->> "fas fa-unlock-alt" ]
-                []
-              ]
-            ]
-          , HH.input 
-            [ "type" ->> "text"
-            , cls $ formControl <> isValid
-            , "id" ->> "validationPassword"
-            , HP.placeholder "输入密码（6 ~ 16位）"
-            , "value" ->> ""
-            , HP.required true
-            ]
-          ]
-        , HH.div 
-          [ cls invalidFeedback ]
-          [ HH.text "" ]
-        ]
+        (renderInputGroup <$> loginFields)
       ]
     , HH.div
       [ cls $ w100 <> dFlex ]

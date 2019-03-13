@@ -16,10 +16,12 @@ import Prelude hiding ((/))
 import Data.Either (note)
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
+import Data.Maybe (fromJust)
+import Partial.Unsafe (unsafePartial)
 import Routing.Duplex (RouteDuplex', as, root, segment)
 import Routing.Duplex.Generic (noArgs, sum)
 import Routing.Duplex.Generic.Syntax ((/))
-import Slug (Slug)
+import Slug (Slug, generate)
 import Slug as Slug
 
 -- | We'll represent routes in our application with a simple sum type. As the application grows, 
@@ -36,6 +38,10 @@ data Route
   | AccountInfo
   | AboutUs
   | ReturnPolicy
+  | TradeCenter
+  | WDTG_ROUTE -- 我的推广
+  | WDDS_ROUTE -- 我的d代售
+  | WDFX_ROUTE -- 我的分享
 
 
 derive instance genericRoute :: Generic Route _
@@ -62,8 +68,16 @@ routeCodec = root $ sum
   , "AboutUs": "about_us" / noArgs
   , "ReturnPolicy": "return_policy" / noArgs
   , "CommodityInfo": "commodity" / slug segment
+  , "WDTG_ROUTE": "wdtg" / noArgs
+  , "WDDS_ROUTE": "wdds" / noArgs
+  , "WDFX_ROUTE": "wdfx" / noArgs
+  , "TradeCenter": "trade_center" / noArgs
   }
 
 -- | This combinator transforms a codec over `String` into one that operatos on the `Slug` type.
 slug :: RouteDuplex' String -> RouteDuplex' Slug
 slug = as Slug.toString (Slug.parse >>> note "Bad slug")
+
+
+testSlug :: Slug
+testSlug = unsafePartial $ fromJust (generate "sss-sss")

@@ -55,7 +55,7 @@ component account =
         , [ Tuple "关于我们" $ Just "1.0.10"
           , Tuple "退换货政策" Nothing
           , Tuple "购物流程" Nothing
-          , Tuple "保定祥琴网络科技有限公司®版权所有" Nothing
+          , Tuple "保定祥琴网络科技有限公司® 版权所有" Nothing
           ]
         ]
       

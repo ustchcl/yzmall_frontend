@@ -2,6 +2,7 @@ module Yzmall.Utils where
 import Halogen.Themes.Bootstrap4 hiding (show)
 import Prelude
 
+import Conduit.Component.Utils (safeHref)
 import Data.Array (zip, (..))
 import Data.Maybe (Maybe(..))
 import Data.Tuple (Tuple(..))
@@ -10,9 +11,10 @@ import Halogen.HTML (IProp)
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
-import String (imgUrl)
+import String (bgBanner, bgFooter, bgHeader, imgUrl, logoNavbar, logoTitle)
 import Web.HTML.Event.EventTypes (cancel)
-import Yzmall.Data.Commodity (Commodity)
+import Yzmall.Data.Commodity (Commodity, CommodityCategory(..))
+import Yzmall.Data.Route (Route(..), testSlug)
 
 type CardInfo =
   { title :: String
@@ -49,8 +51,10 @@ renderCommodity :: forall p i. Int -> H.HTML p i
 renderCommodity n = 
   let pLeftOrRight = if n `mod` 2 == 1 then H.ClassName "pr-md-1 pl-md-0" else H.ClassName "pr-md-0 pl-md-1"
   in
-  HH.div
-  [ cls $ colMd6 <> card <> my2 <> border0 <> px0 <> pLeftOrRight <> bgTransparent]
+  HH.a
+  [ cls $ colMd6 <> card <> my2 <> border0 <> px0 <> pLeftOrRight <> bgTransparent
+  , safeHref (CommodityInfo testSlug)
+  ]
   [ HH.img
     [ cls $ cardImgTop <> pLeftOrRight
     , HP.src imgUrl
@@ -105,7 +109,7 @@ style = attr_ "style"
 -- | Banner
 renderBanner :: forall p i. Array String -> HH.HTML p i
 renderBanner state =
-      HH.div
+      HH.a
         [ HP.class_ $ mxAuto <> myAuto ]
         [
           HH.div
@@ -193,17 +197,42 @@ infix 4 append as <+>
 cls :: ∀ r i. H.ClassName → IProp ( "class" ∷ String | r ) i
 cls = HP.class_
 
+{-
+
+<form class="form-inline my-2 my-lg-0">
+      <input class="form-control mr-sm-2" type="search" placeholder="Search" aria-label="Search">
+      <button class="btn btn-outline-success my-2 my-sm-0" type="submit">Search</button>
+    </form>
+-}
+
+renderHeader ::  ∀ p i. HH.HTML p i
+renderHeader = 
+  HH.div 
+  [ cls $ w100 <> dNone <> H.ClassName "d-md-block" <> bgTransparent
+  , style $ "height: 128px; background-image: url(" <> bgHeader <> ")"
+  ]
+  [ HH.div
+    [cls container]
+    [ HH.img
+      [ HP.src logoTitle ]
+    ]
+  ]
+
 renderNavBar :: ∀ p i. HH.HTML p i
 renderNavBar = 
   HH.nav 
-  [ HP.class_  $ navbar <> H.ClassName "bd-navbar" <> navbarExpandMd <> navbarDark <> bgDark  <+> "sticky-top" ]
+  [ HP.class_  $ navbar <> navbarExpandMd <> navbarDark <>  bgTransparent  <+> "sticky-top" ]
   [ HH.div
     [ cls $ container <> px0]
     [ HH.a 
       [ cls $ navbarBrand
-      , HP.href "#"
+      , safeHref RegularCommodity
       ]
-      [ HH.text "银洲国际" ]
+      [ HH.p
+        [ cls m0
+        , style "color: #ffe8bb"]
+        [ HH.text "银洲国际"]
+      ]
     , HH.button 
       [ HP.class_ navbarToggler
       , "data-toggle" ->> "collapse"
@@ -214,18 +243,36 @@ renderNavBar =
     , HH.div
       [ cls $ collapse <> navbarCollapse 
       , "id" ->> "navbarNav" 
+      ] 
+      [ HH.ul
+        [ cls navbarNav ]
+        (foreach_ ["正价商品", "特价商品", "交易中心", "个人中心"] renderNavItem)
+      , HH.button
+        [ cls $ btn <> btnOutlineDanger <> my2 <> mlAuto <+> "my-sm-0"
+        , "data-toggle" ->> "modal"
+        , "data-target" ->> "#loginModal"
+        ]
+        [ HH.text "登录"]
+      , HH.button
+        [ cls $ btn <> btnDanger <> my2 <> ml3 <+> "my-sm-0"
+        , "data-toggle" ->> "modal"
+        , "data-target" ->> "#registerModal" 
+        ]
+        [ HH.text "注册"]
       ]
-      (foreach_ ["正价商品", "特价商品", "交易中心", "个人中心"] renderNavItem)
     ]
   ]
   
   where
   renderNavItem str n =
-    HH.a 
-      [ cls $ navItem <> navLink <> (if n == 0 then active else H.ClassName "")
-      , HP.href "#"
+    HH.li
+    [ cls $ navItem <> (if n == 0 then active else H.ClassName "")]
+    [ HH.a
+      [ cls $ navLink 
+      , safeHref TradeCenter
       ]
       [ HH.text str ]
+    ]
 
 removerGutter :: String
 removerGutter = "padding-left: -15px; margin-right: -15px;"
@@ -234,14 +281,14 @@ removerGutter = "padding-left: -15px; margin-right: -15px;"
 renderFooter :: ∀ p i. HH.HTML p i
 renderFooter =
   HH.div 
-  [ cls $ bgWarning <> dFlex <> flexColumn <> pt2 <> textDark
-  , style "height: 90px"
+  [ cls $ dFlex <> flexColumn <> textDark <> justifyContentCenter
+  , style $ "height: 160px; padding-top: 2.8rem; font-size: 24; background-position: top center; background-image: url(" <> bgFooter <> ")"
   ]
   [ HH.div
     [ cls mxAuto ]
     [ HH.a
       [ HP.href "#"
-      , cls textDark 
+      , cls $ textDark
       ]
       [ HH.text "购买流程"]
     , HH.text " | "
@@ -253,20 +300,20 @@ renderFooter =
     , HH.text " | "
     , HH.a
       [ HP.href "#"
-      , cls textDark
+      , cls $ textDark
       ]
       [ HH.text "关于我们"]
     ]
   , HH.div
-    [ cls mxAuto]
+    [ cls $ mxAuto <> mt2]
     [ HH.a
       [ HP.href "#"
-      , cls textDark
+      , cls $ textDark
       ]
       [ HH.text "保定祥琴网络科技有限公司" ]
     ]
   , HH.div
-    [ cls mxAuto ] 
+    [ cls $ mxAuto <> mt2 ] 
     [ HH.text "冀ICP备19001701号-1" ]
   ]
 
@@ -280,7 +327,7 @@ getOrElse (Just val) _ = val
 renderModal :: ∀ p i. String -> String -> Array (H.HTML p i) -> Array (H.HTML p i) -> H.HTML p i 
 renderModal id title footer body = 
   HH.div 
-  [ cls $ modal <> fade
+  [ cls $ modal <> fade 
   , HP.tabIndex (-1)
   , "role" ->> "dialog"
   , "id" ->> id
@@ -310,7 +357,7 @@ renderModal id title footer body =
             ]
           ]
         , HH.div 
-          [ cls modalBody ]
+          [ cls modalBody]
           body
         , HH.div
           [ cls modalFooter ]

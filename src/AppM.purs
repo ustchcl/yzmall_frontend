@@ -16,7 +16,7 @@ module Yzmall.AppM where
 
 import Prelude
 
-import Control.Monad.Reader (class MonadAsk, ReaderT(..), asks, runReaderT)
+import Control.Monad.Reader (class MonadAsk, ReaderT(..), ask, asks, runReaderT)
 import Data.Argonaut.Encode (encodeJson)
 import Data.Maybe (Maybe(..))
 import Effect.Aff (Aff)
@@ -33,9 +33,11 @@ import Yzmall.Api.Capablity.Resource.Account (class ManageAccount, getAccountInf
 import Yzmall.Api.Endpoint (Endpoint(..))
 import Yzmall.Api.Request (BaseURL(..), RequestMethod(..))
 import Yzmall.Api.Utils (decode, mkRequest)
+import Yzmall.Capability.LogMessages (class LogMessages)
 import Yzmall.Capability.Navigate (class Navigate, navigate)
 import Yzmall.Capability.Now (class Now)
 import Yzmall.Data.Account (Account, decodeAccount)
+import Yzmall.Data.Log as Log
 import Yzmall.Data.Route as Route
 
 type Env = 
@@ -70,6 +72,13 @@ instance nowAppM :: Now AppM where
   nowDate = liftEffect Now.nowDate
   nowTime = liftEffect Now.nowTime
   nowDateTime = liftEffect Now.nowDateTime
+
+-- instance logMessagesAppM :: LogMessages AppM where
+--   logMessage log = do 
+--     env <- ask
+--     liftEffect case env.logLevel, Log.reason log of
+--       Prod, Log.Debug -> pure unit
+--       _, _ -> Console.log $ Log.message log
 
 instance navigateAppM :: Navigate AppM where
   navigate = 

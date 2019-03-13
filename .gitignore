@@ -1,0 +1,19 @@
+# Dependencies
+.psci_modules
+bower_components
+node_modules
+.vscode
+
+# Dot files
+.psci
+.pulp-cache
+.purs-repl
+.package-lock
+.psc-ide-port
+.cache
+
+# Generated
+output
+dce-output
+*.lock
+*.map

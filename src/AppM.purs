@@ -22,10 +22,10 @@ import Data.Maybe (Maybe(..))
 import Effect.Aff (Aff)
 import Effect.Aff.Class (class MonadAff)
 import Effect.Class (class MonadEffect, liftEffect)
+import Effect.Console as Console
 import Effect.Now as Now
 import Effect.Ref (Ref)
 import Effect.Ref as Ref
-import Halogen.HTML.Properties (method)
 import Routing.Duplex (print)
 import Routing.Hash (setHash)
 import Type.Equality (class TypeEquals, from)
@@ -37,8 +37,10 @@ import Yzmall.Capability.LogMessages (class LogMessages)
 import Yzmall.Capability.Navigate (class Navigate, navigate)
 import Yzmall.Capability.Now (class Now)
 import Yzmall.Data.Account (Account, decodeAccount)
+import Yzmall.Data.Commodity (decodeArrayCommodity, decodeCommodity)
 import Yzmall.Data.Log as Log
 import Yzmall.Data.Route as Route
+import Yzmall.Resource.Commodity (class ManageCommodity, getCommodities, getCommodity)
 
 type Env = 
   { logLevel :: LogLevel
@@ -46,7 +48,7 @@ type Env =
   , currentAccount :: Ref (Maybe Account)
   }
 
-data LogLevel = Dev | Prob
+data LogLevel = Dev | Prod
 
 derive instance eqLogLevel :: Eq LogLevel
 derive instance ordLogLevel :: Ord LogLevel
@@ -73,12 +75,12 @@ instance nowAppM :: Now AppM where
   nowTime = liftEffect Now.nowTime
   nowDateTime = liftEffect Now.nowDateTime
 
--- instance logMessagesAppM :: LogMessages AppM where
---   logMessage log = do 
---     env <- ask
---     liftEffect case env.logLevel, Log.reason log of
---       Prod, Log.Debug -> pure unit
---       _, _ -> Console.log $ Log.message log
+instance logMessagesAppM :: LogMessages AppM where
+  logMessage log = do 
+    env <- ask 
+    liftEffect case env.logLevel, Log.reason log of
+      Prod, Log.Debug -> pure unit
+      _, _ -> Console.log $ Log.message log
 
 instance navigateAppM :: Navigate AppM where
   navigate = 
@@ -87,6 +89,14 @@ instance navigateAppM :: Navigate AppM where
   logout = do
     liftEffect <<< Ref.write Nothing =<< asks _.currentAccount
     navigate Route.Home
+
+instance managerCommodityAppM :: ManageCommodity AppM where
+  getCommodities params = 
+    mkRequest { endpoint: ViewCommodity params, method: Get  }
+      >>= decode decodeArrayCommodity
+  getCommodity slug = 
+    mkRequest { endpoint: GetCommodity slug, method: Get }
+      >>= decode decodeCommodity
 
 {-
 class Monad m <= ManageAccount m where
@@ -97,11 +107,11 @@ class Monad m <= ManageAccount m where
   getAccountInfo :: m (Maybe Account)
   setIDCard :: IDCard -> m (Maybe Account)
 -}
--- instance manageAccountAppM :: ManageAccount AppM where
---   getAccountInfo = mkRequest { endpoint: MyAccountInfo, method: Get }
---     >>= decode decodeAccount
+instance manageAccountAppM :: ManageAccount AppM where
+  getAccountInfo = mkRequest { endpoint: MyAccountInfo, method: Get }
+    >>= decode decodeAccount
     
---   login loginFeilds = do
---     let method = Post $ Just $ encodeJson { loginFeilds }
---     mkRequest { endpoint: Login, method: method }
---       >>= decode decodeAccount
+  login loginFeilds = do
+    let method = Post $ Just $ encodeJson { loginFeilds }
+    mkRequest { endpoint: Login, method: method }
+      >>= decode decodeAccount

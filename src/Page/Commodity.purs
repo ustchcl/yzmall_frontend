@@ -1,51 +1,60 @@
 module Yzmall.Page.Commodity where
 
-import Halogen.Themes.Bootstrap4
+import Halogen.Themes.Bootstrap4 hiding (show)
 import Prelude
 
 import Conduit.Component.Utils (safeHref)
+import Control.Monad.Reader (class MonadAsk)
 import Data.Maybe (Maybe(..))
+import Effect.Aff.Class (class MonadAff)
+import Effect.Ref (Ref)
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
+import Network.RemoteData (RemoteData(..), fromMaybe)
 import String (banner1, banner2, bgBanner, bgCommodity, bgTuiGuang, cardContent, iconWdds, iconWdfx, iconWdtg, imgUrl, rectPng)
+import Yzmall.Capability.Navigate (class Navigate)
+import Yzmall.Data.Account (Account)
 import Yzmall.Data.Avatar (Avatar, parse)
+import Yzmall.Data.Commodity (Commodity, CommodityCategory(..))
 import Yzmall.Data.Route (Route(..))
 import Yzmall.Page.Part.Login (renderLoginModal, renderRegisterModal)
 import Yzmall.Page.Part.MobileMenu (forMobileMenu, mobileMenu)
+import Yzmall.Resource.Commodity (class ManageCommodity, getCommodities)
 import Yzmall.Utils (CardInfo, cls, foreach_, renderBanner, renderCommodity, renderFooter, renderHeader, renderNavBar, style, (->>))
 
-type CM =
-    { img :: Maybe Avatar
-    , name :: String
-    , description :: String
-    }
+type State = 
+  { currentAccount :: Maybe Account
+  , commodities :: RemoteData String (Array Commodity)
+  }
 
-cm :: CM
-cm =
-    { img : (parse "")
-    , name: "test"
-    , description: "This is a description from commodity."
-    }
+data Query a 
+  = Initialize a
+  | LoadCommodities a
 
-type State = Array CM
-
-data Query a =
-    InitialCommodities a
-
-component :: forall m. H.Component HH.HTML Query Unit Void m
+component 
+  :: forall m r
+   . MonadAff m 
+   => MonadAsk { currentAccount :: Ref (Maybe Account) | r} m
+   => Navigate m
+   => ManageCommodity m
+   => H.Component HH.HTML Query Unit Void m
 component =
-    H.component
-        { initialState: const initialState
-        , render
-        , eval
-        , receiver: const Nothing
-        }
+    H.lifecycleComponent
+      { initialState
+      , render
+      , eval
+      , receiver: const Nothing
+      , initializer: Just $ H.action Initialize
+      , finalizer: Nothing
+      }
     where
-    initialState :: State
-    initialState =
-        [ cm, cm ]
+    initialState :: Unit -> State
+    initialState _ = 
+      { currentAccount : Nothing
+      , commodities : NotAsked
+      }
 
     render :: State -> H.ComponentHTML Query
     render state =
@@ -68,15 +77,7 @@ component =
             [ cls $ container <> px0 ]
             [ HH.div
               [ cls $ dFlex <> flexWrap ]
-              [ renderCommodity 1
-              , renderCommodity 2
-              , renderCommodity 3
-              , renderCommodity 4
-              , renderCommodity 5
-              ]
-              -- [ renderCard cardInitialState
-              -- , renderCard cardInitialState
-              -- , renderCard cardInitialState ]
+              (renderCommodities state.commodities)
             ]
           ]
         , renderFooter
@@ -94,12 +95,27 @@ component =
             , imgSrc: imgUrl
             , btnName: "Go somewhere"
             }
+        
+        renderCommodities = case _ of
+          NotAsked ->  
+            [ HH.text "commodities not loaded" ]
+          Loading -> 
+            [ HH.text "Loading commodities" ]
+          Failure err ->  
+            [ HH.text $ "Failed loading commodities: " <> err ]
+          Success arr ->
+            foreach_ arr renderCommodity
 
     eval :: Query ~> H.ComponentDSL State Query Void m
     eval = case _ of
-        InitialCommodities next ->
-        -- 1. 加载正价或特价商品
-            pure next
+      Initialize a -> do
+        void $ H.fork $ eval $ LoadCommodities a
+        pure a
+      LoadCommodities a -> do
+        st <- H.modify _ { commodities = Loading }
+        commodities <- getCommodities { category: show Regular, page: Nothing, size: Nothing }
+        H.modify_ _ { commodities = fromMaybe commodities }
+        pure a
 
 renderMenu :: forall p i. H.HTML p i
 renderMenu =

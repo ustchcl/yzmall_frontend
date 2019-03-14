@@ -13,17 +13,17 @@ module Yzmall.Api.Endpoint where
 
 import Prelude hiding ((/))
 
+import Affjax.RequestBody (RequestBody(..))
 import Data.Generic.Rep (class Generic)
 import Data.Generic.Rep.Show (genericShow)
 import Data.Lens.Iso.Newtype (_Newtype)
 import Data.Maybe (Maybe(..))
--- import Conduit.Data.Comment (CommentId)
--- import Conduit.Data.Route (slug, uname)
--- import Conduit.Data.Username (Username)
 import Routing.Duplex (RouteDuplex', int, optional, prefix, root, segment, string)
 import Routing.Duplex.Generic (noArgs, sum)
 import Routing.Duplex.Generic.Syntax ((/), (?))
 import Slug (Slug)
+import Yzmall.Data.Commodity (CommodityCategory)
+import Yzmall.Data.Route (slug)
 
 -- | First, let's define a few types necessary for our larger `Endpoint` type.
 
@@ -31,8 +31,8 @@ import Slug (Slug)
 -- | to skip over). Since some endpoints accept pagination in addition to other parameters, we'll
 -- | create a row that can be shared by multiple types.
 type PaginationRep =
-  ( limit :: Maybe Int 
-  , offset :: Maybe Int 
+  ( page :: Maybe Int 
+  , size :: Maybe Int 
   )
 
 -- | This record type is useful for endpoints that only need pagination information.
@@ -58,7 +58,16 @@ data Endpoint
   | CreateVcode
   | ResetPassword
   | CreateAccount
+  | ViewCommodity CommodityParams
+  | GetCommodity Slug
+  | CreateOrder Slug
+  | CreateSpecialOrder Slug
 
+
+type CommodityParams = 
+  { category :: String
+  | PaginationRep
+  }
 
 derive instance genericEndpoint :: Generic Endpoint _
 
@@ -85,7 +94,16 @@ endpointCodec = root $ sum
   , "MyAccountInfo": "account" / "mine" / noArgs
   , "VerifyIDCard": "account" / "mine" / "setName" / noArgs
   , "Login": "public" / "account" / "login" / noArgs
+
+  , "CreateOrder": "commodity" / slug segment / "createOrder"
+  , "CreateSpecialOrder": "commodity" / slug segment / "createOrderSpecial"
   , "CreateVcode": "public" / "account" / "createVcode" / noArgs
   , "ResetPassword": "public" / "account" / "resetPassword" / noArgs
-  , "CreateAccount": "public" / "acount" / "createAccount" / noArgs
-  }
+  , "CreateAccount": "public" / "account" / "createAccount" / noArgs
+  , "ViewCommodity": "public" / "commodity" / "" ? 
+        { category: string
+        , page: optional <<< int 
+        , size: optional <<< int 
+        }
+  , "GetCommodity": "public" / "commodity" / slug segment
+  } 

@@ -3,12 +3,27 @@ module Yzmall.Data.Commodity where
 
 import Prelude
 
-import Data.Maybe (Maybe(..))
-import Yzmall.Data.Avatar (Avatar)
+import Affjax.RequestBody (RequestBody(..))
+import Data.Argonaut.Core (Json)
+import Data.Argonaut.Decode (decodeJson, (.:))
+import Data.Argonaut.Decode.Class (decodeJArray)
+import Data.Either (Either, hush, isRight)
+import Data.Maybe (Maybe(..), fromMaybe)
+import Data.Set.NonEmpty (filter)
+import Data.Traversable (sequence)
+import Web.HTML.HTMLTrackElement (setDefault)
+import Yzmall.Data.Avatar (Avatar, parse)
 
 data CommodityCategory = Regular | Special
 derive instance eqCommodityCategory :: Eq CommodityCategory
-type CommodityTag = String
+instance showCommodityCategory :: Show CommodityCategory where
+  show Regular = "REGULAR"
+  show Special = "SPECIAL"
+
+type CommodityTag = 
+  { id :: Int 
+  , content :: String
+  }
 
 type CommodityRep row =
   ( id :: Int
@@ -17,12 +32,13 @@ type CommodityRep row =
   , tag :: Array CommodityTag
   , price :: Number
   , gold :: Number
-  , stock :: Int
+  , stock ::Int
   , sale :: Int
   , onSale :: Boolean
   , recommend :: Boolean
-  , thumbnial :: Maybe Avatar
-  , picture :: Maybe Avatar
+  , thumbnail :: String
+  , picture :: String
+  , rebateACT :: Number
   | row
   )
 
@@ -42,6 +58,46 @@ forkData =
   , sale : 5
   , onSale : true
   , recommend : true
-  , thumbnial : Nothing
-  , picture : Nothing
+  , thumbnail : ""
+  , picture : ""
+  , rebateACT: 1.0
   }
+
+
+decodeArrayCommodity :: Json -> Either String (Array Commodity)
+decodeArrayCommodity = sequence <<< (map decodeCommodity) <=< decodeJArray
+
+decodeCommodity :: Json -> Either String Commodity
+decodeCommodity json = do
+  obj <- decodeJson json
+  id <- obj .: "id"
+  name <- obj .: "name"
+  category <- genCategory <$> obj .: "category"
+  price <- obj .: "price"
+  -- primeCost <- obj .: "primeCost"
+  rebateACT <- obj .: "rebateACT"
+  gold <- obj .: "gold"
+  stock <- obj .: "stock"
+  sale <- obj .: "sale"
+  onSale <- obj .: "onSale"
+  recommend <- obj .: "recommend"
+  thumbnail <- obj .: "thumbnail"
+  picture <- obj .: "picture"
+  tag <- decodeCommodityTags =<< obj .: "tag"
+  pure { id, name, category, price, rebateACT, gold, stock, sale, onSale, recommend, thumbnail, picture, tag }
+
+
+genCategory :: String -> CommodityCategory
+genCategory "SPECIAL" = Special
+genCategory _ = Regular
+
+decodeCommodityTags :: Json -> Either String (Array CommodityTag)
+decodeCommodityTags = sequence <<< (map decodeCommodityTag) <=< decodeJArray
+
+decodeCommodityTag :: Json -> Either String CommodityTag
+decodeCommodityTag json = do
+  obj <- decodeJson json
+  id <- obj .: "id"
+  content <- obj .: "content"
+  pure { id, content }
+

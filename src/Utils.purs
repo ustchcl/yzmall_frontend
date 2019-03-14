@@ -4,13 +4,15 @@ import Prelude
 
 import Conduit.Component.Utils (safeHref)
 import Data.Array (zip, (..))
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), fromJust)
 import Data.Tuple (Tuple(..))
 import Halogen as H
 import Halogen.HTML (IProp)
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
+import Partial.Unsafe (unsafePartial)
+import Slug (generate)
 import String (bgBanner, bgFooter, bgHeader, imgUrl, logoNavbar, logoTitle)
 import Web.HTML.Event.EventTypes (cancel)
 import Yzmall.Data.Commodity (Commodity, CommodityCategory(..))
@@ -47,17 +49,17 @@ renderCard state =
           ]
         ]
 
-renderCommodity :: forall p i. Int -> H.HTML p i
-renderCommodity n = 
-  let pLeftOrRight = if n `mod` 2 == 1 then H.ClassName "pr-md-1 pl-md-0" else H.ClassName "pr-md-0 pl-md-1"
+renderCommodity :: forall p i. Commodity -> Int -> H.HTML p i
+renderCommodity com n = 
+  let pLeftOrRight = if n `mod` 2 == 0 then H.ClassName "pr-md-1 pl-md-0" else H.ClassName "pr-md-0 pl-md-1"
   in
   HH.a
   [ cls $ colMd6 <> card <> my2 <> border0 <> px0 <> pLeftOrRight <> bgTransparent
-  , safeHref (CommodityInfo testSlug)
+  , safeHref (CommodityInfo $ unsafePartial $ fromJust (generate $ show com.id))
   ]
   [ HH.img
     [ cls $ cardImgTop <> pLeftOrRight
-    , HP.src imgUrl
+    , HP.src com.thumbnail
     ]
   , HH.div
     [ cls $ cardBody <> row <> px0 <> py1 <> alignMiddle ]
@@ -67,14 +69,14 @@ renderCommodity n =
         [ cls $ cardText <> textTruncate <> w100 <> pl1
         , "style" ->> "color: #DFDBC6"
         ]
-        [ HH.text "S-120 开光天然东陵玉貔貅吊坠"]
+        [ HH.text com.name ]
       ]
     , HH.div
       [ cls $ col3  ]
       [ HH.small
         [ "style" ->> "color: #DFDBC6"
         , cls $ floatRight <> pr1 <> pt1]
-        [ HH.text "销量:100"]
+        [ HH.text $ "销量:" <> show com.sale]
       ]
     , HH.div
       [cls col6]
@@ -82,7 +84,7 @@ renderCommodity n =
         [ cls $ cardText <> w100 <> pl1
         , style "font-size: 150%; color: #F6C17F" 
         ]
-        [HH.text "￥2500.00"]
+        [HH.text $ "￥" <> show com.price]
       ]
     , HH.div
       [cls col6]
@@ -90,7 +92,7 @@ renderCommodity n =
         [ cls $ floatRight <> pr1 <> pt1
         , style "color: #F6C17F" 
         ]
-        [HH.text "(赠送1000金币)"]
+        [HH.text $ "(赠送" <> show com.gold <> "金币)"]
       ]
     ]
   ]

@@ -29,6 +29,7 @@ import Yzmall.Page.TradeCenter as TC
 import Yzmall.Page.Wdds as WDDS
 import Yzmall.Page.Wdfx as WDFX
 import Yzmall.Page.Wdtg as WDTG
+import Yzmall.Resource.Commodity (class ManageCommodity)
 
 type State =
   { route :: Route }
@@ -68,10 +69,10 @@ component
    . MonadAff m
   => MonadAsk { currentAccount :: Ref (Maybe Account) | r } m
   => Now m
-  -- => LogMessages m
+  => LogMessages m
   => Navigate m
-  -- => ManageAccount m
-  -- => ManageArticle m
+  => ManageAccount m
+  => ManageCommodity m
   -- => ManageComment m
   -- => ManageTag m
   => H.Component HH.HTML Query Input Void m
@@ -98,8 +99,8 @@ component =
       HH.slot' CP.cp1 unit RS.component unit absurd
     AccountInfo -> 
       HH.slot' CP.cp2 unit (PC.component Nothing) unit absurd
-    CommodityInfo _ -> 
-      HH.slot' CP.cp3 unit CDI.component unit absurd
+    CommodityInfo slug -> 
+      HH.slot' CP.cp3 unit CDI.component { slug } absurd
     WDDS_ROUTE -> 
       HH.slot' CP.cp4 unit WDDS.component unit absurd
     WDTG_ROUTE -> 

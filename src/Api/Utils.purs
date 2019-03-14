@@ -9,7 +9,7 @@ import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:))
 import Data.Either (Either(..), hush)
 import Data.Maybe (Maybe(..))
 import Effect.Aff.Class (class MonadAff, liftAff)
-import Yzmall.Api.Request (BaseURL(..), RequestOptions, defaultRequest)
+import Yzmall.Api.Request (BaseURL(..), RequestOptions, defaultRequest, defaultRequestForm)
 import Yzmall.Capability.LogMessages (class LogMessages, logError)
 import Yzmall.Capability.Now (class Now)
 
@@ -21,7 +21,7 @@ mkRequest
   -> m (Maybe Json)
 mkRequest opts = do
   { baseUrl } <- ask
-  response <- liftAff $ request $ defaultRequest baseUrl opts
+  response <- liftAff $ request $ defaultRequestForm baseUrl opts
   pure $ hush response.body
 
 

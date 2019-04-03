@@ -13,7 +13,7 @@ import Effect (Effect)
 import Effect.Aff (Aff, launchAff_)
 import Effect.Aff.Class (liftAff)
 import Effect.Class (liftEffect)
-import Effect.Console (log)
+import Effect.Console (error, log)
 import Effect.Ref (Ref)
 import Effect.Ref as Ref
 import Halogen as H
@@ -31,61 +31,42 @@ import Yzmall.Capability.LogMessages (logDebug, logError)
 import Yzmall.Component.Router as Router
 import Yzmall.Data.Account (Account, decodeAccount)
 import Yzmall.Data.Route (Route, routeCodec)
-import Yzmall.Page.Commodity (component)
-import Yzmall.Page.CommodityInfo as CDI
-import Yzmall.Page.PersonalCenter as PC
-import Yzmall.Page.Wdds as WDDS
-import Yzmall.Page.Wdtg as WDTG
+import Yzmall.Page.Utils (initCommodities)
 
 main :: Effect Unit
 main = HA.runHalogenAff do
   body <- HA.awaitBody
   let 
-    baseUrl = BaseURL "http://192.168.0.138:8080/yzmall-server"
+    -- baseUrl = BaseURL "http://192.168.0.138:8080/yzmall-server"
+    baseUrl = BaseURL "http://www.scix.vip/yzmall-server"
     logLevel = Dev
 
+  liftEffect $ initCommodities
   -- 
   currentAccount <- liftEffect $ Ref.new Nothing
+  currentAddressId <- liftEffect $ Ref.new Nothing
+  currentBankCardId <- liftEffect $ Ref.new Nothing
+  lastRoute <- liftEffect $ Ref.new Nothing
   initialHash <- liftEffect $ getHash
 
   -- 尝试登陆
-  -- let 
-  --   loginFields = { phone: "123", password: "123" }
-  --   method = Post $ Just $ encodeJson loginFields
-  --   requestOps = { endpoint : Login, method: method }
-
-  -- liftEffect loginTest >>= traverse_ \op -> do
-  --   res <- liftAff $ request $ defaultRequest baseUrl op
-  --   let account = decodeAt "sss" =<< lmap printResponseFormatError res.body
-  --   liftEffect $ Ref.write (hush account) currentAccount
-  --   pure unit
-
-  -- _ <- liftAff $ request $ defaultRequestForm baseUrl requestOps
   
-  -- liftEffect loginTest >>= traverse_ \op -> do
-  --   res <- liftAff $ request $ defaultRequest baseUrl op
-  --   let u = decodeAccount =<< lmap printResponseFormatError res.body
-  --   liftEffect $ testLog u
-    -- liftEffect $ log "request"
-    -- liftEffect $ log $ show (_.phone <$> (hush u))
-    -- liftEffect $ Ref.write (hush u) currentAccount
-    -- pure unit
-  -- >>= \json -> do
-  --   account <- decode decodeAccount (Just json)
-  --   liftEffect $ Ref.write account currentAccount
-  --   pure unit
+  liftEffect tryLogin >>= traverse_ \op -> do
+    res <- liftAff $ request $ defaultRequest baseUrl op
+    let u = decodeAccount =<< lmap printResponseFormatError res.body
+    liftEffect $ testLog u
+    liftEffect $ Ref.write (hush u) currentAccount
+    pure unit
 
   let
     environment :: Env
-    environment = { currentAccount, baseUrl, logLevel }
+    environment = { currentAccount, baseUrl, logLevel, currentAddressId, currentBankCardId, lastRoute }
 
     rootComponent :: H.Component HH.HTML Router.Query Router.Input Void Aff
     rootComponent = H.hoist (runAppM environment) Router.component
 
     initialRoute :: Maybe Route
     initialRoute = hush $ parse routeCodec initialHash
-  -- accountInfo <- liftAff $ mkRequest { endpoint: MyAccountInfo, method: Get}  >>= decode 
-  -- logDebug accountInfo
 
   halogenIO <- runUI rootComponent initialRoute body
   void $ liftEffect $ matchesWith (parse routeCodec) \old new ->
@@ -97,14 +78,11 @@ main = HA.runHalogenAff do
 
 
 
-loginTest :: Effect (Maybe { endpoint :: Endpoint, method :: RequestMethod })
-loginTest = do
-  let 
-    loginFields = { phone: "123", password: "123" }
-    method = Post $ Just $ encodeJson { loginFields }
+tryLogin :: Effect (Maybe { endpoint :: Endpoint, method :: RequestMethod })
+tryLogin = do
   pure $ Just { endpoint : MyAccountInfo, method: Get }
   
 
 testLog :: Either String Account -> Effect Unit
 testLog (Left err) = log err
-testLog (Right acc) = log $ show acc.phone
+testLog (Right acc) = log $ show acc.defaultAddress

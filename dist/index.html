@@ -3,21 +3,60 @@
   <head>
     <!-- Required meta tags -->
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="viewport" content="width=device-width,user-scalable=yes,minimum-scale=1.0,maximum-scale=1.0"/>
 
     <!-- Bootstrap CSS -->
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
+    <link rel="stylesheet" href="./css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
     <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.7.2/css/all.css" integrity="sha384-fnmOCqbTlWIlj8LyTjo7mOUStjsKC4pOpQbqyi7RrhN7udi9RwhKkMHpvLbHG9Sr" crossorigin="anonymous">
     <link rel="stylesheet" href="./css/yzmall.css" crossorigin="anonymous">
 
     <title>银洲国际</title>
   </head>
-  <body>
+  <body style="background-color: #333333">
     <!-- Optional JavaScript -->
     <!-- jQuery first, then Popper.js, then Bootstrap JS -->
-    <script src="app.js"></script>
-    <script src="https://code.jquery.com/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js" integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q" crossorigin="anonymous"></script>
-    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js" integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl" crossorigin="anonymous"></script>
+    <script src="./app.min.js"></script>
+    <!-- <script src="./app.js"></script>
+    <script src="./js/city.js"></script>
+    <script src="./js/method01.js"></script> -->
+    <script src="./js/jquery-3.2.1.slim.min.js" integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN" crossorigin="anonymous"></script>
+    <script src="./js/popper.min.js" integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q" crossorigin="anonymous"></script>
+    <script src="./js/bootstrap.min.js" integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl" crossorigin="anonymous"></script>
+    <script>
+      let saidHello = false;
+      const VERSION = 'v0.9.9.3 2019-03-25';
+      sayHello("Release")
+      function sayHello(type)
+      {
+          if (saidHello)
+          {
+              return;
+          }
+
+          if (navigator.userAgent.toLowerCase().indexOf('chrome') > -1)
+          {
+              const args = [
+                  `\n %c %c %c Yzmall ${VERSION} - ✰ ${type} ✰  %c  %c  http://www.scix.vip/  %c %c ♥%c♥%c♥ \n\n`,
+                  'background: #ff66a5; padding:5px 0;',
+                  'background: #ff66a5; padding:5px 0;',
+                  'color: #ff66a5; background: #030307; padding:5px 0;',
+                  'background: #ff66a5; padding:5px 0;',
+                  'background: #ffc3dc; padding:5px 0;',
+                  'background: #ff66a5; padding:5px 0;',
+                  'color: #ff2424; background: #fff; padding:5px 0;',
+                  'color: #ff2424; background: #fff; padding:5px 0;',
+                  'color: #ff2424; background: #fff; padding:5px 0;',
+              ];
+
+              window.console.log.apply(console, args);
+          }
+          else if (window.console)
+          {
+              window.console.log(`PixiJS ${VERSION} - ${type} - http://www.scix.vip/`);
+          }
+
+          saidHello = true;
+      }
+    </script>
   </body>
 </html>

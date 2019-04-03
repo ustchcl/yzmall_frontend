@@ -38,7 +38,7 @@ type CommodityRep row =
   , recommend :: Boolean
   , thumbnail :: String
   , picture :: String
-  , rebateACT :: Number
+  , rebateMYT :: Number
   | row
   )
 
@@ -60,7 +60,7 @@ forkData =
   , recommend : true
   , thumbnail : ""
   , picture : ""
-  , rebateACT: 1.0
+  , rebateMYT: 1.0
   }
 
 
@@ -75,7 +75,7 @@ decodeCommodity json = do
   category <- genCategory <$> obj .: "category"
   price <- obj .: "price"
   -- primeCost <- obj .: "primeCost"
-  rebateACT <- obj .: "rebateACT"
+  rebateMYT <- obj .: "rebateMYT"
   gold <- obj .: "gold"
   stock <- obj .: "stock"
   sale <- obj .: "sale"
@@ -84,7 +84,7 @@ decodeCommodity json = do
   thumbnail <- obj .: "thumbnail"
   picture <- obj .: "picture"
   tag <- decodeCommodityTags =<< obj .: "tag"
-  pure { id, name, category, price, rebateACT, gold, stock, sale, onSale, recommend, thumbnail, picture, tag }
+  pure { id, name, category, price, rebateMYT, gold, stock, sale, onSale, recommend, thumbnail, picture, tag }
 
 
 genCategory :: String -> CommodityCategory

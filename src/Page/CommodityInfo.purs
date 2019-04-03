@@ -3,10 +3,10 @@ module Yzmall.Page.CommodityInfo where
 import Halogen.Themes.Bootstrap4 hiding (show)
 import Prelude
 
-import Conduit.Component.Utils (maybeElem)
+import Conduit.Component.Utils (maybeElem, safeHref)
 import Control.Monad.Reader (class MonadAsk)
 import Data.Lens (preview)
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), fromJust)
 import Effect.Aff.Class (class MonadAff)
 import Effect.Ref (Ref)
 import Halogen as H
@@ -14,15 +14,19 @@ import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Network.RemoteData (RemoteData(..), _Success, fromMaybe)
-import Slug (Slug)
+import Partial.Unsafe (unsafePartial)
+import Slug (Slug, generate)
 import String (banner1, bgCommodity, bgInfoTitle, c105Info)
 import Yzmall.Api.Capablity.Resource.Account (class ManageAccount)
 import Yzmall.Capability.Navigate (class Navigate)
 import Yzmall.Data.Account (Account)
 import Yzmall.Data.Avatar (Avatar, parse)
 import Yzmall.Data.Commodity (Commodity, CommodityCategory(..), forkData)
+import Yzmall.Data.Route (Route(..))
 import Yzmall.Page.Part.Login (renderLoginModal, renderRegisterModal)
 import Yzmall.Page.Part.MobileMenu (forMobileMenu, mobileMenu)
+import Yzmall.Page.Part.Navbar (NavbarPage(..))
+import Yzmall.Page.Part.Navbar as Navbar
 import Yzmall.Page.Utils (mobileOnly, pcOnly, yellowColor)
 import Yzmall.Resource.Commodity (class ManageCommodity, getCommodity)
 import Yzmall.Utils (CardInfo, cls, foreach_, renderBanner, renderCommodity, renderFooter, renderHeader, renderNavBar, style, (->>))
@@ -40,6 +44,9 @@ data Query a
   | GetCommodity a
   | PurchaseCommodity Int a
 
+type ChildQuery = Navbar.Query
+type ChildSlot = Unit
+
 component
   :: forall m r
    . MonadAff m
@@ -49,7 +56,7 @@ component
   => Navigate m
   => H.Component HH.HTML Query Input Void m
 component =
-  H.lifecycleComponent
+  H.lifecycleParentComponent
     { initialState
     , render
     , eval
@@ -64,7 +71,7 @@ component =
     , slug
     }
 
-  eval :: Query ~> H.ComponentDSL State Query Void m
+  eval :: Query ~> H.ParentDSL State Query ChildQuery Unit Void m
   eval = case _ of
     Initialize a -> do
       void $ H.fork $ eval $ GetCommodity a
@@ -77,13 +84,13 @@ component =
     PurchaseCommodity _ a -> 
       pure a 
   
-  render :: State -> H.ComponentHTML Query
+  render :: State -> H.ParentHTML Query ChildQuery Unit m
   render state = 
      HH.div
         [ cls $ containerFluid <> px0 
         , style $ "overflow-x: hidden; background-image: url(" <> bgCommodity <> ")"]
         [ renderHeader
-        , renderNavBar
+        , maybeElem mbCommodity renderNavbar'
         -- | show pc
         , maybeElem mbCommodity pcDiv
         -- | show on mobile
@@ -97,24 +104,24 @@ component =
           , maybeElem mbCommodity info
           ]
         , renderFooter
-        , HH.div
-          [ cls mobileOnly
-          , style "height: 50px"
-          ]
-          []
-        , HH.div
-          [ cls mobileOnly ]
-          [ HH.button 
-            [ cls $ btn <> btnDanger <> w100 <> fixedBottom
-            , style "font-size: 24px"
-            ]
-            [ HH.text "立即购买"]
-          ]
-        , renderLoginModal
-        , renderRegisterModal
+        , maybeElem mbCommodity purchaseBtn
         ]
       where
       mbCommodity = preview _Success state.commodity
+
+      renderNavbar' commodity = 
+        HH.slot unit Navbar.component { page: (if Special == commodity.category then Second else First)  } absurd
+
+      purchaseBtn commodity = 
+        HH.div
+          [ cls mobileOnly ]
+          [ HH.a 
+            [ cls $ btn <> btnDanger <> w100 <> fixedBottom
+            , style "font-size: 24px"
+            , safeHref $ (if commodity.category == Regular then PurchaseConfirm else SpecialPurchaseConfirm) $ unsafePartial $ fromJust $ generate $ show commodity.id
+            ]
+            [ HH.text "立即购买"]
+          ]
 
       info commodity =
         HH.img 
@@ -138,28 +145,34 @@ component =
               [ cls $ floatRight <> mt2
               , style "color: #f8f2d8"
               ]
-              [ HH.text $ "（需消耗" <> show commodity.gold <> "金币）" ]
+              [ HH.text $ "（" <> (if commodity.category == Regular then "可获得" else "需消耗") <> show commodity.gold <> "金币）" ]
             ]
           , HH.div
             [ cls $  row <> container <> px0 <> mxAuto]
             [ HH.div 
-              [ cls $ col7 <> px1 ]
+              [ cls $ col12 <> px1 ]
               [ HH.h4 
                 [ style "color: #f8f2d8" ]
                 [ HH.text $ commodity.name ]
               , HH.div
-                [ cls $ w100 <> pt2 <> textWhite
+                [ cls $ w100 <> pt2 <> textWhite <> flexColumn
                 , style "border-top: 1px dashed #f8f2d8"
                 ]
                 [ HH.div 
-                  [ cls $ mb1 ]
-                  [ HH.text "运费: 包邮" ]
+                  [ cls $ mb1 <> dFlex]
+                  [ HH.div_ [HH.text "运费: 包邮" ]
+                  , HH.div 
+                    [ cls  mlAuto ]
+                    [ HH.text $ "销量: " <> show commodity.sale ]
+                  ]
                 , HH.div 
-                  [ cls mb1]
-                  [ HH.text $ "销量: " <> show commodity.sale ]
-                , HH.div_
-                  [ HH.text $ "库存: " <> show commodity.stock ]
+                  [ cls $ w100 <> dFlex ]
+                  [ HH.div 
+                    [ cls mlAuto]
+                    [ HH.text $ "库存: " <> show commodity.stock ]
+                  ]
                 ]
+              
               ]
             ]
           ]
@@ -185,7 +198,7 @@ component =
               [ HH.text $ "￥" <> show commodity.price <> "元" ]
             , HH.h5
               [ style yellowColor ]
-              [ HH.text $ "("<> (if commodity.category == Regular then "需消耗" else "可获得") <> show commodity.gold <> "金币)"]
+              [ HH.text $ "("<> (if commodity.category == Regular then "可获得" else "需消耗") <> show commodity.gold <> "金币)"]
             , HH.div
               [ cls $ dFlex <> flexColumn <> textWhite <> pt2 <> mbAuto
               , style "border-top: 1px dashed #f8f2d8"
@@ -199,9 +212,10 @@ component =
               , HH.div_
                 [ HH.text $ "库存: " <> show commodity.stock ]
               ]
-            , HH.button
+            , HH.a
               [ cls $ btn <> btnDanger <> w100 <> rounded0 <> pt0
-              , style "font-size: 38px" ]
+              , style "font-size: 38px" 
+              , safeHref $ (if commodity.category == Regular then PurchaseConfirm else SpecialPurchaseConfirm) $ unsafePartial $ fromJust $ generate $ show commodity.id ]
               [ HH.div 
                 [ cls myAuto ]
                 [ HH.text "立即购买" ]

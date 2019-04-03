@@ -47,10 +47,22 @@ type Pagination = { | PaginationRep  }
 data Endpoint
   = 
   -- 账号服务
+  
+  -- Address 
   MyAddresses
-  | MyBankCards
-  | BankCard
   | AddAddress
+  | DeleteAddress Slug
+  | GetAddress Slug
+
+  | Invitees
+  | Logout
+  | BindAlipay
+  -- BankCard
+  | MyBankCards
+  | GetBankCard Slug
+  | AddBankCard
+  | DeleteBankCard Slug
+  -- Order
   | MyAccountInfo
   | VerifyIDCard
   -- 公共账号服务
@@ -58,10 +70,22 @@ data Endpoint
   | CreateVcode
   | ResetPassword
   | CreateAccount
+  | SetName
   | ViewCommodity CommodityParams
   | GetCommodity Slug
+-- 商品服务
+  | ViewOrder
+  | PayForOrder Slug
+  | CreateOrderSpecial Slug
+  | PayForOrderSpecial Slug
+  | DeleteOrder Slug
+  | CreateACTSellCommission
+  | CreateACTSellRebate
+  | CreateACTSellRush
   | CreateOrder Slug
-  | CreateSpecialOrder Slug
+  | ACTSharedRecord
+  | MyACTSells
+  | ViewCommissions
 
 
 type CommodityParams = 
@@ -87,23 +111,42 @@ instance showEndpoint :: Show Endpoint where
 -- | https://github.com/natefaubion/purescript-routing-duplex/tree/v0.2.0
 endpointCodec :: RouteDuplex' Endpoint
 endpointCodec = root $ sum
-  { "MyAddresses": "account" / "address" / noArgs 
-  , "MyBankCards": "account" / "bankCard" / noArgs
-  , "BankCard": "account" / "bankCard" / noArgs
-  , "AddAddress": "acount" / "address" / noArgs
+  { "MyAddresses": "account" / "address" / "" / noArgs 
+  , "AddAddress": "account" / "address" / noArgs
+  , "DeleteAddress": "account" / "address" / slug segment / "delete"
+  , "GetAddress": "account" / "address" / slug segment 
   , "MyAccountInfo": "account" / "mine" / noArgs
   , "VerifyIDCard": "account" / "mine" / "setName" / noArgs
   , "Login": "public" / "account" / "login" / noArgs
-
-  , "CreateOrder": "commodity" / slug segment / "createOrder"
-  , "CreateSpecialOrder": "commodity" / slug segment / "createOrderSpecial"
   , "CreateVcode": "public" / "account" / "createVcode" / noArgs
   , "ResetPassword": "public" / "account" / "resetPassword" / noArgs
   , "CreateAccount": "public" / "account" / "createAccount" / noArgs
+  , "SetName": "account" / "mine" / "setName" / noArgs
+  , "Invitees": "account" / "invitees" / noArgs
+  , "Logout" : "account" / "logout" / noArgs
+  , "BindAlipay": "account" / "mine" / "setAlipay" / noArgs
   , "ViewCommodity": "public" / "commodity" / "" ? 
         { category: string
         , page: optional <<< int 
         , size: optional <<< int 
         }
   , "GetCommodity": "public" / "commodity" / slug segment
+  -- 商品服务
+  , "ViewOrder" : "commodity" / "order" / "" / noArgs
+  , "PayForOrder" : "commodity" / "order" / slug segment / "pay"
+  , "CreateOrderSpecial": "commodity" / slug segment / "createOrderSpecial"
+  , "PayForOrderSpecial": "commodity" / "order" / slug segment / "paySpecial"
+  , "DeleteOrder": "commodity" / "order" / slug segment / "delete"
+  , "CreateACTSellCommission": "commodity" / "createMYTSellCommission" / noArgs
+  , "CreateACTSellRebate": "commodity" / "createMYTSellRebate" / noArgs
+  , "CreateACTSellRush": "commodity" / "createMYTSellRush" / noArgs
+  , "CreateOrder": "commodity" / slug segment / "createOrder"
+  , "ACTSharedRecord": "commodity" / "mytSharedRecord" / noArgs
+  , "MyACTSells": "commodity" / "mytSell" / "" / noArgs
+  , "ViewCommissions": "commodity" / "commission" / "" / noArgs
+  -- BankCard
+  , "MyBankCards": "account" / "bankCard" / "" / noArgs 
+  , "AddBankCard": "account" / "bankCard" / noArgs
+  , "DeleteBankCard": "account" / "bankCard" / slug segment / "delete"
+  , "GetBankCard": "account" / "bankCard" / slug segment 
   } 

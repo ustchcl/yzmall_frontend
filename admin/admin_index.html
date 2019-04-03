@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <!-- Required meta tags -->
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://cdn.bootcss.com/bootstrap/4.0.0/css/bootstrap.min.css"
+        integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
+
+    <title>Hello, world!</title>
+    <script src="./fields_and_names.js"></script>
+    <script src="./admin.js"></script>
+    <script type="text/javascript">
+        async function init() {
+            initEvents();
+            console.log("???")
+            let loginResult = await tryLogin();
+            if (!loginResult) {
+                $("#exampleModal").modal("show");
+            }
+        }
+        window.onload = init;
+    </script>
+</head>
+
+<body>
+    <div class="row mt-3">
+        <div class="col-3">
+            <div class="card">
+                <div class="card-body">
+                  <h5 class="card-title">修改Config</h5>
+                  <a href="#" class="btn btn-danger" id="edit_config">开始</a>
+                </div>
+              </div>
+        </div>
+        <div class="col-3">
+            <div class="card">
+                <div class="card-body">
+                  <h5 class="card-title">修改Account包含的参数值</h5>
+                  <form class="form-inline my-2 my-lg-0">
+                    <input id="edit_account_input"class="form-control mr-sm-2" type="search" placeholder="输入AccountId" aria-label="Search">
+                    <button class="btn btn-danger my-2 my-sm-0" type="button" id="edit_account">开始</button>
+                  </form>
+                </div>
+              </div>
+        </div>
+        <div class="col-3">
+            <div class="card">
+                <div class="card-body">
+                  <h5 class="card-title">创建Commodity</h5>
+                  <a href="#" class="btn btn-danger" id="add_commodity">开始</a>
+                </div>
+              </div>
+        </div>
+        <div class="col-3">
+            <div class="card">
+                <div class="card-body">
+                  <h5 class="card-title">修改Commodity包含的参数值</h5>
+                  <form class="form-inline my-2 my-lg-0">
+                    <input id="edit_commodity_input"class="form-control mr-sm-2" type="search" placeholder="输入CommodityId" aria-label="Search">
+                    <button class="btn btn-danger my-2 my-sm-0" type="button" id="edit_commodity">开始</button>
+                  </form>
+                </div>
+              </div>
+        </div>
+    </div>
+
+    <div class="row mt-3">
+        <div class="col-3">
+            <div class="card">
+                <div class="card-body">
+                  <h5 class="card-title"> 修改Order包含的参数值</h5>
+                  <form class="form-inline my-2 my-lg-0">
+                    <input id="edit_order_input"class="form-control mr-sm-2" type="search" placeholder="输入OrderId" aria-label="Search">
+                    <button class="btn btn-danger my-2 my-sm-0" type="button" id="edit_order">开始</button>
+                  </form>
+                </div>
+              </div>
+        </div>
+        <div class="col-3">
+            <div class="card">
+                <div class="card-body">
+                  <h5 class="card-title">修改ACTSharedRecord包含的参数值</h5>
+                  <form class="form-inline my-2 my-lg-0">
+                    <input id="edit_mytsharedrecord_input"class="form-control mr-sm-2" type="search" placeholder="输入ACTSharedRecordId" aria-label="Search">
+                    <button class="btn btn-danger my-2 my-sm-0" type="button" id="edit_mytsharedrecord">开始</button>
+                  </form>
+                </div>
+              </div>
+        </div>
+        <div class="col-3">
+            <div class="card">
+                <div class="card-body">
+                  <h5 class="card-title">修改MYTSell包含的参数值</h5>
+                  <form class="form-inline my-2 my-lg-0">
+                    <input id="edit_mytsell_input"class="form-control mr-sm-2" type="search" placeholder="输入MYTSellId" aria-label="Search">
+                    <button class="btn btn-danger my-2 my-sm-0" type="button" id="edit_mytsell">开始</button>
+                  </form>
+                </div>
+              </div>
+        </div>
+        <div class="col-3">
+            <div class="card">
+                <div class="card-body">
+                  <h5 class="card-title">修改MYTSell包含的参数值</h5>
+                  <form class="form-inline my-2 my-lg-0">
+                    <input id="edit_mytsell_input"class="form-control mr-sm-2" type="search" placeholder="输入MYTSellId" aria-label="Search">
+                    <button class="btn btn-danger my-2 my-sm-0" type="button" id="edit_mytsell">开始</button>
+                  </form>
+                </div>
+              </div>
+        </div>
+    </div>
+    <div class="w-100" id="content-container">
+
+    </div>
+
+
+    <div class="modal fade" id="exampleModal" tabindex="-1" role="dialog" aria-labelledby="exampleModalLabel"
+        aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="exampleModalLabel">登录</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">&times;</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <form>
+                        <div class="form-group">
+                            <label for="phone" class="col-form-label">手机号</label>
+                            <input type="text" class="form-control" id="phone">
+                        </div>
+                        <div class="form-group">
+                            <label for="password" class="col-form-label">密码</label>
+                            <input class="form-control" id="password" type="password"></input>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">关闭</button>
+                    <button type="button" class="btn btn-primary" id="loginBtn" data-dismiss="modal">登录</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="modal fade" id="editorModal" tabindex="-1" role="dialog" aria-labelledby="editorModalLabel"
+        aria-hidden="true">
+    </div>
+
+    <!-- Optional JavaScript -->
+    <!-- jQuery first, then Popper.js, then Bootstrap JS -->
+    <script src="https://cdn.bootcss.com/jquery/3.2.1/jquery.slim.min.js"
+        integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN"
+        crossorigin="anonymous"></script>
+    <script src="https://cdn.bootcss.com/popper.js/1.12.9/umd/popper.min.js"
+        integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q"
+        crossorigin="anonymous"></script>
+    <script src="https://cdn.bootcss.com/bootstrap/4.0.0/js/bootstrap.min.js"
+        integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl"
+        crossorigin="anonymous"></script>
+
+</body>
+
+</html>

@@ -2,16 +2,23 @@ module Yzmall.Api.Utils where
 
 import Prelude
 
-import Affjax (request)
+import Affjax (Response, request)
+import Affjax.StatusCode (StatusCode(..))
 import Control.Monad.Reader (class MonadAsk, ask)
 import Data.Argonaut.Core (Json)
 import Data.Argonaut.Decode (class DecodeJson, decodeJson, (.:))
-import Data.Either (Either(..), hush)
+import Data.Either (Either(..), hush, note)
 import Data.Maybe (Maybe(..))
+import Effect (Effect)
 import Effect.Aff.Class (class MonadAff, liftAff)
+import Effect.Class (liftEffect)
+import Web.XHR.XMLHttpRequest (response)
+import Yzmall.Api.Endpoint (Endpoint(..))
 import Yzmall.Api.Request (BaseURL(..), RequestOptions, defaultRequest, defaultRequestForm)
 import Yzmall.Capability.LogMessages (class LogMessages, logError)
 import Yzmall.Capability.Now (class Now)
+import Yzmall.Data.ErrorMsg (decodeErrorMsg)
+import Yzmall.Page.Utils (alertMsg, unsafeAlert)
 
 mkRequest 
   :: forall m r
@@ -22,7 +29,27 @@ mkRequest
 mkRequest opts = do
   { baseUrl } <- ask
   response <- liftAff $ request $ defaultRequestForm baseUrl opts
-  pure $ hush response.body
+  let 
+    status = response.status
+    body = hush response.body
+  liftEffect $ handleError status (note "sth." body) opts.endpoint
+  pure body
+
+handleError :: StatusCode -> Either String Json  -> Endpoint -> Effect Unit
+handleError status body endpoint = do
+  case status of 
+    (StatusCode 200) -> pure unit
+    _ ->
+      let 
+        errMsg = decodeErrorMsg =<< body
+      in
+      case errMsg of 
+        Left _ -> 
+          case endpoint of
+            Login ->  pure $ unsafeAlert "登录失败, 手机号或密码不正确"
+            _ -> pure unit 
+        Right err -> pure $ unsafeAlert err.content
+  pure unit
 
 
 -- | We can decode records and primitive types automatically, and we've defined custom decoders for

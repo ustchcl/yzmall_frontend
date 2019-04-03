@@ -3,12 +3,20 @@ module Yzmall.Page.Part.Login where
 import Halogen.Themes.Bootstrap4
 import Prelude
 
+import Control.Monad.Reader (class MonadAsk, ask)
+import Data.Maybe (Maybe(..))
+import Effect (Effect)
+import Effect.Class (class MonadEffect, liftEffect)
+import Effect.Ref (Ref)
+import Effect.Ref as Ref
 import Halogen as H
 import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import String (logo)
-import Yzmall.Page.Utils (InputGroupConfig, renderInputGroup)
+import Yzmall.Api.Capablity.Resource.Account (class ManageAccount, login)
+import Yzmall.Data.Account (Account)
+import Yzmall.Page.Utils (InputGroupConfig, callback, getInputValue, renderInputGroup)
 import Yzmall.Utils (cls, renderModal, style, (->>))
 
 
@@ -48,7 +56,7 @@ registerFields =
 
 renderRegisterModal :: ∀ p i. H.HTML p i
 renderRegisterModal = 
-  renderModal "registerModal" "注册" footer body
+  renderModal "registerModal" "注册" footer body true
   where
     footer = 
       [ HH.div
@@ -99,7 +107,7 @@ loginFields =
   ]
 renderLoginModal :: ∀ p i. H.HTML p i 
 renderLoginModal = 
-  renderModal "loginModal" "登录" footer body
+  renderModal "loginModal" "登录" footer body true
   where
   -- body :: ∀ p i. Array (H.HTML p i)
   footer =
@@ -138,3 +146,27 @@ renderLoginModal =
         [ HH.text "忘记密码" ]
       ]
     ]
+
+
+-- loginAction
+--   :: forall m r
+--    . MonadEffect m
+--   => MonadAsk { currentAccount :: Ref (Maybe Account) | r } m
+--   => ManageAccount m
+--   => String -> String -> m Unit
+-- loginAction phone password =
+--   -- account <- login { phone, password }
+--   login { phone, password } >>= \account -> do
+--     liftEffect $ Ref.write account $ asks _.currentAccount
+--     pure unit
+
+loginAction 
+  :: forall m r
+   . MonadEffect m 
+  => MonadAsk { currentAccount :: Ref (Maybe Account) | r } m
+  => ManageAccount m
+  => String -> String -> m Unit
+loginAction phone password = do
+  account <- login { phone, password }
+  { currentAccount } <- ask
+  liftEffect $ Ref.write account currentAccount

@@ -197,7 +197,7 @@ type Unlifted a = a
 -- | password field can be a `Maybe String` or a `String`, depending on what we need!
 -- |
 -- | By convention, I give row types that will later be used as records the `-Rep` suffix.
-type AuthFieldsRep box r = ( phone :: Phone, password :: box String | r )
+type AuthFieldsRep box r = ( phone :: String, password :: box String | r )
 
 -- | Our login and registration records both require a password field with a `String` value. 
 -- | However, in the `Conduit.Capability.Resource.User` module, we'll see another record using  

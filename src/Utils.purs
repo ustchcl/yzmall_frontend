@@ -3,8 +3,9 @@ import Halogen.Themes.Bootstrap4 hiding (show)
 import Prelude
 
 import Conduit.Component.Utils (safeHref)
-import Data.Array (zip, (..))
+import Data.Array (take, takeEnd, zip, (..))
 import Data.Maybe (Maybe(..), fromJust)
+import Data.String (fromCodePointArray, toCodePointArray)
 import Data.Tuple (Tuple(..))
 import Halogen as H
 import Halogen.HTML (IProp)
@@ -12,11 +13,11 @@ import Halogen.HTML as HH
 import Halogen.HTML.Events as HE
 import Halogen.HTML.Properties as HP
 import Partial.Unsafe (unsafePartial)
-import Slug (generate)
+import Slug (Slug, generate)
 import String (bgBanner, bgFooter, bgHeader, imgUrl, logoNavbar, logoTitle)
 import Web.HTML.Event.EventTypes (cancel)
 import Yzmall.Data.Commodity (Commodity, CommodityCategory(..))
-import Yzmall.Data.Route (Route(..), testSlug)
+import Yzmall.Data.Route (HomeType(..), Route(..), testSlug)
 
 type CardInfo =
   { title :: String
@@ -56,11 +57,22 @@ renderCommodity com n =
   HH.a
   [ cls $ colMd6 <> card <> my2 <> border0 <> px0 <> pLeftOrRight <> bgTransparent
   , safeHref (CommodityInfo $ unsafePartial $ fromJust (generate $ show com.id))
+  , style "text-decoration:none;"
   ]
-  [ HH.img
-    [ cls $ cardImgTop <> pLeftOrRight
-    , HP.src com.thumbnail
-    ]
+  [ HH.div 
+    [ cls $ cardImgTop ]
+    ([ HH.img
+      [  cls $ cardImgTop <> pLeftOrRight
+      , HP.src com.thumbnail
+      ]
+    ] <> if (com.stock > 0) then [] else [
+        HH.img
+        [ cls $ cardImgTop <> cardImgOverlay <> p0 <> pLeftOrRight
+        , style "position: absolute"
+        , HP.src "./image/none.png"
+        ]
+    ])
+    
   , HH.div
     [ cls $ cardBody <> row <> px0 <> py1 <> alignMiddle ]
     [ HH.div
@@ -86,14 +98,14 @@ renderCommodity com n =
         ]
         [HH.text $ "￥" <> show com.price]
       ]
-    , HH.div
-      [cls col6]
-      [ HH.b
-        [ cls $ floatRight <> pr1 <> pt1
-        , style "color: #F6C17F" 
-        ]
-        [HH.text $ "(赠送" <> show com.gold <> "金币)"]
-      ]
+    -- , HH.div
+    --   [cls col6]
+    --   [ HH.b
+    --     [ cls $ floatRight <> pr1 <> pt1
+    --     , style "color: #F6C17F" 
+    --     ]
+    --     [HH.text $ "(" <> (if com.category == Regular then "赠送" else "消耗") <> show com.gold <> "金币)"]
+    --   ]
     ]
   ]
 
@@ -109,8 +121,8 @@ style :: forall r i. String -> IProp r i
 style = attr_ "style"
 
 -- | Banner
-renderBanner :: forall p i. Array String -> HH.HTML p i
-renderBanner state =
+renderBanner :: forall p i. HH.HTML p i
+renderBanner =
       HH.a
         [ HP.class_ $ mxAuto <> myAuto ]
         [
@@ -121,10 +133,10 @@ renderBanner state =
             ]
             [ HH.ol
               [ HP.class_ carouselIndicators]
-              (foreach_ (map (const "carouselControls") state) renderli)
+              [ renderli "carouselControls" 0]
             , HH.div
                 [ HP.class_ carouselInner ]
-                (foreach_ state renderSlider)
+                [ renderSlider "./image/banner_01.jpeg" "https://mp.weixin.qq.com/s/xBamclrgnW5YDzCyLQFavw" ]
             , HH.a
               [ HP.class_ carouselControlPrev
               , HP.href "#carouselControls"
@@ -158,15 +170,16 @@ renderBanner state =
             ]
           ]
 
-renderSlider :: forall p i. String -> Int -> HH.HTML p i
-renderSlider src n =
-    HH.div
-      [ HP.class_ $ carouselItem <> (if n == 0 then active else H.ClassName "") 
+renderSlider :: forall p i. String -> String -> HH.HTML p i
+renderSlider src url =
+    HH.a
+      [ HP.class_ $ carouselItem <> active 
+      , HP.href url
       ] 
       [ HH.img
         [ HP.class_ $ dBlock <> w100
         , HP.src src
-        , HP.alt $ "slider" <> show n
+        , HP.alt $ "slider-1" 
         ]
       ]
 
@@ -228,7 +241,7 @@ renderNavBar =
     [ cls $ container <> px0]
     [ HH.a 
       [ cls $ navbarBrand
-      , safeHref RegularCommodity
+      , safeHref (RegularCommodity NormalHome)
       ]
       [ HH.p
         [ cls m0
@@ -248,7 +261,11 @@ renderNavBar =
       ] 
       [ HH.ul
         [ cls navbarNav ]
-        (foreach_ ["正价商品", "特价商品", "交易中心", "个人中心"] renderNavItem)
+        [ renderNavItem  "正价商品" 0 (RegularCommodity NormalHome) 
+        , renderNavItem  "特价商品" 1 (SpecialCommodity NormalHome) 
+        , renderNavItem  "交易中心" 2 (RegularCommodity NormalHome) 
+        , renderNavItem  "个人中心" 3 (RegularCommodity NormalHome) 
+        ]
       , HH.button
         [ cls $ btn <> btnOutlineDanger <> my2 <> mlAuto <+> "my-sm-0"
         , "data-toggle" ->> "modal"
@@ -266,12 +283,12 @@ renderNavBar =
   ]
   
   where
-  renderNavItem str n =
+  renderNavItem str n route =
     HH.li
     [ cls $ navItem <> (if n == 0 then active else H.ClassName "")]
     [ HH.a
       [ cls $ navLink 
-      , safeHref TradeCenter
+      , safeHref route
       ]
       [ HH.text str ]
     ]
@@ -282,42 +299,46 @@ removerGutter = "padding-left: -15px; margin-right: -15px;"
 
 renderFooter :: ∀ p i. HH.HTML p i
 renderFooter =
-  HH.div 
-  [ cls $ dFlex <> flexColumn <> textDark <> justifyContentCenter
-  , style $ "height: 160px; padding-top: 2.8rem; font-size: 24; background-position: top center; background-image: url(" <> bgFooter <> ")"
-  ]
-  [ HH.div
-    [ cls mxAuto ]
-    [ HH.a
-      [ HP.href "#"
-      , cls $ textDark
-      ]
-      [ HH.text "购买流程"]
-    , HH.text " | "
-    , HH.a
-      [ HP.href "#"
-      , cls textDark
-      ]
-      [ HH.text "退换货政策" ]
-    , HH.text " | "
-    , HH.a
-      [ HP.href "#"
-      , cls $ textDark
-      ]
-      [ HH.text "关于我们"]
-    ]
-  , HH.div
-    [ cls $ mxAuto <> mt2]
-    [ HH.a
-      [ HP.href "#"
-      , cls $ textDark
-      ]
-      [ HH.text "保定祥琴网络科技有限公司" ]
-    ]
-  , HH.div
-    [ cls $ mxAuto <> mt2 ] 
-    [ HH.text "冀ICP备19001701号-1" ]
-  ]
+  HH.text ""
+  -- HH.div 
+  -- [ cls $ dFlex <> flexColumn <> textDark <> justifyContentCenter
+  -- , style $ "height: 160px; padding-top: 2.8rem; font-size: 24; background-position: top center; background-image: url(" <> bgFooter <> ")"
+  -- ]
+  -- [ HH.div 
+  --   [ cls $ mxAuto <> mt2 ]
+  --   [ HH.text "2018-2019 Silver Continent International® All Rights Reserved." ] 
+  -- HH.div
+  --   [ cls mxAuto ]
+  --   [ HH.a
+  --     [ HP.href "#"
+  --     , cls $ textDark
+  --     ]
+  --     [ HH.text "购买流程"]
+  --   , HH.text " | "
+  --   , HH.a
+  --     [ HP.href "#"
+  --     , cls textDark
+  --     ]
+  --     [ HH.text "退换货政策" ]
+  --   , HH.text " | "
+  --   , HH.a
+  --     [ HP.href "#"
+  --     , cls $ textDark
+  --     ]
+  --     [ HH.text "关于我们"]
+  --   ]
+  -- , HH.div
+  --   [ cls $ mxAuto <> mt2]
+  --   [ HH.a
+  --     [ HP.href "#"
+  --     , cls $ textDark
+  --     ]
+  --     [ HH.text "保定祥琴网络科技有限公司" ]
+  --   ]
+  -- , HH.div
+  --   [ cls $ mxAuto <> mt2 ] 
+  --   [ HH.text "冀ICP备19001701号-1" ]
+  -- ]
 
 
 
@@ -326,8 +347,8 @@ getOrElse Nothing val = val
 getOrElse (Just val) _ = val
 
 
-renderModal :: ∀ p i. String -> String -> Array (H.HTML p i) -> Array (H.HTML p i) -> H.HTML p i 
-renderModal id title footer body = 
+renderModal :: ∀ p i. String -> String -> Array (H.HTML p i) -> Array (H.HTML p i) -> Boolean-> H.HTML p i 
+renderModal id title footer body hideClose = 
   HH.div 
   [ cls $ modal <> fade 
   , HP.tabIndex (-1)
@@ -347,7 +368,9 @@ renderModal id title footer body =
           [ HH.h5 
             [ cls modalTitle ]
             [ HH.text title ]
-          , HH.button
+          , if hideClose then
+            (
+            HH.button
             [ cls close
             , "type" ->> "button"
             , "data-dismiss" ->> "modal"
@@ -356,7 +379,7 @@ renderModal id title footer body =
             [ HH.span
               [ "aria-hidden" ->> "true" ]
               [ HH.text "×" ]
-            ]
+            ]) else (HH.text "")
           ]
         , HH.div 
           [ cls modalBody]
@@ -368,3 +391,19 @@ renderModal id title footer body =
       ]
     ]
   ]
+
+
+encodePhone :: String -> String 
+encodePhone phone = 
+  func (take 3) phone <> "****" <> func (takeEnd 4) phone
+  where
+  func f = fromCodePointArray <<< f <<< toCodePointArray
+
+
+-- You have to gurantee the string cannot be empty
+unsafeSlug :: String -> Slug
+unsafeSlug str = unsafePartial $ fromJust $ generate str
+
+backgroundImage :: String -> String
+backgroundImage url = 
+  "background-image: url(" <> url <> "); background-position: center center; background-size: contain; background-repeat: no-repeat; "

@@ -99,9 +99,14 @@ var PS = {};
 
   function id(x) {
     return x;
-  }                       
+  }
+
+  exports.fromBoolean = id;
+  exports.fromNumber = id;
   exports.fromString = id;
   exports.fromObject = id;
+
+  exports.jsonNull = null;
 
   exports.stringify = function (j) {
     return JSON.stringify(j);
@@ -303,6 +308,15 @@ var PS = {};
   var showNumber = new Show($foreign.showNumberImpl);
   var showInt = new Show($foreign.showIntImpl);
   var showChar = new Show($foreign.showCharImpl);
+  var showBoolean = new Show(function (v) {
+      if (v) {
+          return "true";
+      };
+      if (!v) {
+          return "false";
+      };
+      throw new Error("Failed pattern match at Data.Show line 20, column 1 - line 20, column 37: " + [ v.constructor.name ]);
+  });
   var show = function (dict) {
       return dict.show;
   };
@@ -311,6 +325,7 @@ var PS = {};
   };
   exports["Show"] = Show;
   exports["show"] = show;
+  exports["showBoolean"] = showBoolean;
   exports["showInt"] = showInt;
   exports["showNumber"] = showNumber;
   exports["showChar"] = showChar;
@@ -765,6 +780,49 @@ var PS = {};
           };
       };
   };
+  var max = function (dictOrd) {
+      return function (x) {
+          return function (y) {
+              var v = compare(dictOrd)(x)(y);
+              if (v instanceof Data_Ordering.LT) {
+                  return y;
+              };
+              if (v instanceof Data_Ordering.EQ) {
+                  return x;
+              };
+              if (v instanceof Data_Ordering.GT) {
+                  return x;
+              };
+              throw new Error("Failed pattern match at Data.Ord line 128, column 3 - line 131, column 12: " + [ v.constructor.name ]);
+          };
+      };
+  };
+  var min = function (dictOrd) {
+      return function (x) {
+          return function (y) {
+              var v = compare(dictOrd)(x)(y);
+              if (v instanceof Data_Ordering.LT) {
+                  return x;
+              };
+              if (v instanceof Data_Ordering.EQ) {
+                  return x;
+              };
+              if (v instanceof Data_Ordering.GT) {
+                  return y;
+              };
+              throw new Error("Failed pattern match at Data.Ord line 119, column 3 - line 122, column 12: " + [ v.constructor.name ]);
+          };
+      };
+  };
+  var clamp = function (dictOrd) {
+      return function (low) {
+          return function (hi) {
+              return function (x) {
+                  return min(dictOrd)(hi)(max(dictOrd)(low)(x));
+              };
+          };
+      };
+  };
   var abs = function (dictOrd) {
       return function (dictRing) {
           return function (x) {
@@ -779,6 +837,9 @@ var PS = {};
   exports["Ord"] = Ord;
   exports["compare"] = compare;
   exports["greaterThanOrEq"] = greaterThanOrEq;
+  exports["min"] = min;
+  exports["max"] = max;
+  exports["clamp"] = clamp;
   exports["abs"] = abs;
   exports["ordInt"] = ordInt;
   exports["ordString"] = ordString;
@@ -1322,6 +1383,17 @@ var PS = {};
       };
       return Just;
   })();
+  var showMaybe = function (dictShow) {
+      return new Data_Show.Show(function (v) {
+          if (v instanceof Just) {
+              return "(Just " + (Data_Show.show(dictShow)(v.value0) + ")");
+          };
+          if (v instanceof Nothing) {
+              return "Nothing";
+          };
+          throw new Error("Failed pattern match at Data.Maybe line 205, column 1 - line 205, column 47: " + [ v.constructor.name ]);
+      });
+  };
   var maybe = function (v) {
       return function (v1) {
           return function (v2) {
@@ -1413,6 +1485,7 @@ var PS = {};
   exports["applyMaybe"] = applyMaybe;
   exports["bindMaybe"] = bindMaybe;
   exports["eqMaybe"] = eqMaybe;
+  exports["showMaybe"] = showMaybe;
 })(PS["Data.Maybe"] = PS["Data.Maybe"] || {});
 (function(exports) {
     "use strict";
@@ -1513,31 +1586,7 @@ var PS = {};
       result[n] = i;
       return result;
     };
-  };
-
-  var replicateFill = function (count) {
-    return function (value) {
-      if (count < 1) {
-        return [];
-      }
-      var result = new Array(count);
-      return result.fill(value);
-    };
-  };
-
-  var replicatePolyfill = function (count) {
-    return function (value) {
-      var result = [];
-      var n = 0;
-      for (var i = 0; i < count; i++) {
-        result[n++] = value;
-      }
-      return result;
-    };
-  };
-
-  // In browsers that have Array.prototype.fill we use it, as it's faster.
-  exports.replicate = typeof Array.prototype.fill === "function" ? replicateFill : replicatePolyfill;
+  };   
 
   //------------------------------------------------------------------------------
   // Array size ------------------------------------------------------------------
@@ -1628,6 +1677,18 @@ var PS = {};
   };
 
   //------------------------------------------------------------------------------
+  // Sorting ---------------------------------------------------------------------
+  //------------------------------------------------------------------------------
+
+  exports.sortImpl = function (f) {
+    return function (l) {
+      return l.slice().sort(function (x, y) {
+        return f(x)(y);
+      });
+    };
+  };
+
+  //------------------------------------------------------------------------------
   // Subarrays -------------------------------------------------------------------
   //------------------------------------------------------------------------------
 
@@ -1636,6 +1697,12 @@ var PS = {};
       return function (l) {
         return l.slice(s, e);
       };
+    };
+  };
+
+  exports.take = function (n) {
+    return function (l) {
+      return n < 1 ? [] : l.slice(0, n);
     };
   };
 
@@ -1972,32 +2039,6 @@ var PS = {};
               })($196));
           };
       };
-  };
-  var intercalate = function (dictFoldable) {
-      return function (dictMonoid) {
-          return function (sep) {
-              return function (xs) {
-                  var go = function (v) {
-                      return function (x) {
-                          if (v.init) {
-                              return {
-                                  init: false,
-                                  acc: x
-                              };
-                          };
-                          return {
-                              init: false,
-                              acc: Data_Semigroup.append(dictMonoid.Semigroup0())(v.acc)(Data_Semigroup.append(dictMonoid.Semigroup0())(sep)(x))
-                          };
-                      };
-                  };
-                  return (foldl(dictFoldable)(go)({
-                      init: true,
-                      acc: Data_Monoid.mempty(dictMonoid)
-                  })(xs)).acc;
-              };
-          };
-      };
   }; 
   var foldableMaybe = new Foldable(function (dictMonoid) {
       return function (f) {
@@ -2082,7 +2123,6 @@ var PS = {};
   exports["traverse_"] = traverse_;
   exports["for_"] = for_;
   exports["sequence_"] = sequence_;
-  exports["intercalate"] = intercalate;
   exports["any"] = any;
   exports["elem"] = elem;
   exports["notElem"] = notElem;
@@ -3153,11 +3193,36 @@ var PS = {};
           });
       };
   });
+  var takeEnd = function (n) {
+      return function (xs) {
+          return $foreign.drop($foreign.length(xs) - n | 0)(xs);
+      };
+  };
   var tail = $foreign["uncons'"](Data_Function["const"](Data_Maybe.Nothing.value))(function (v) {
       return function (xs) {
           return new Data_Maybe.Just(xs);
       };
   });
+  var sortBy = function (comp) {
+      return function (xs) {
+          var comp$prime = function (x) {
+              return function (y) {
+                  var v = comp(x)(y);
+                  if (v instanceof Data_Ordering.GT) {
+                      return 1;
+                  };
+                  if (v instanceof Data_Ordering.EQ) {
+                      return 0;
+                  };
+                  if (v instanceof Data_Ordering.LT) {
+                      return -1 | 0;
+                  };
+                  throw new Error("Failed pattern match at Data.Array line 702, column 15 - line 707, column 1: " + [ v.constructor.name ]);
+              };
+          };
+          return $foreign.sortImpl(comp$prime)(xs);
+      };
+  };
   var singleton = function (a) {
       return [ a ];
   };
@@ -3216,13 +3281,15 @@ var PS = {};
   exports["index"] = index;
   exports["elemIndex"] = elemIndex;
   exports["findIndex"] = findIndex;
+  exports["sortBy"] = sortBy;
+  exports["takeEnd"] = takeEnd;
   exports["zip"] = zip;
   exports["range"] = $foreign.range;
-  exports["replicate"] = $foreign.replicate;
   exports["length"] = $foreign.length;
   exports["cons"] = $foreign.cons;
   exports["snoc"] = $foreign.snoc;
   exports["filter"] = $foreign.filter;
+  exports["take"] = $foreign.take;
   exports["drop"] = $foreign.drop;
 })(PS["Data.Array"] = PS["Data.Array"] || {});
 (function(exports) {
@@ -3483,8 +3550,11 @@ var PS = {};
   exports["toArray"] = toArray;
   exports["toObject"] = toObject;
   exports["jsonEmptyObject"] = jsonEmptyObject;
+  exports["fromBoolean"] = $foreign.fromBoolean;
+  exports["fromNumber"] = $foreign.fromNumber;
   exports["fromString"] = $foreign.fromString;
   exports["fromObject"] = $foreign.fromObject;
+  exports["jsonNull"] = $foreign.jsonNull;
   exports["stringify"] = $foreign.stringify;
 })(PS["Data.Argonaut.Core"] = PS["Data.Argonaut.Core"] || {});
 (function(exports) {
@@ -3719,6 +3789,7 @@ var PS = {};
       return Data_Maybe.Nothing.value;
   };
   var string = $$String.create;
+  var json = Json.create;
   exports["ArrayView"] = ArrayView;
   exports["Blob"] = Blob;
   exports["Document"] = Document;
@@ -3727,6 +3798,7 @@ var PS = {};
   exports["FormURLEncoded"] = FormURLEncoded;
   exports["Json"] = Json;
   exports["string"] = string;
+  exports["json"] = json;
   exports["toMediaType"] = toMediaType;
 })(PS["Affjax.RequestBody"] = PS["Affjax.RequestBody"] || {});
 (function(exports) {
@@ -3928,6 +4000,13 @@ var PS = {};
   var state = function (dict) {
       return dict.state;
   };
+  var put = function (dictMonadState) {
+      return function (s) {
+          return state(dictMonadState)(function (v) {
+              return new Data_Tuple.Tuple(Data_Unit.unit, s);
+          });
+      };
+  };
   var modify_ = function (dictMonadState) {
       return function (f) {
           return state(dictMonadState)(function (s) {
@@ -3959,6 +4038,7 @@ var PS = {};
   exports["MonadState"] = MonadState;
   exports["get"] = get;
   exports["gets"] = gets;
+  exports["put"] = put;
   exports["modify"] = modify;
   exports["modify_"] = modify_;
 })(PS["Control.Monad.State.Class"] = PS["Control.Monad.State.Class"] || {});
@@ -4730,6 +4810,45 @@ var PS = {};
       };
       return TypeMismatch;
   })();
+  var ErrorAtIndex = (function () {
+      function ErrorAtIndex(value0, value1) {
+          this.value0 = value0;
+          this.value1 = value1;
+      };
+      ErrorAtIndex.create = function (value0) {
+          return function (value1) {
+              return new ErrorAtIndex(value0, value1);
+          };
+      };
+      return ErrorAtIndex;
+  })();
+  var ErrorAtProperty = (function () {
+      function ErrorAtProperty(value0, value1) {
+          this.value0 = value0;
+          this.value1 = value1;
+      };
+      ErrorAtProperty.create = function (value0) {
+          return function (value1) {
+              return new ErrorAtProperty(value0, value1);
+          };
+      };
+      return ErrorAtProperty;
+  })();
+  var renderForeignError = function (v) {
+      if (v instanceof ForeignError) {
+          return v.value0;
+      };
+      if (v instanceof ErrorAtIndex) {
+          return "Error at array index " + (Data_Show.show(Data_Show.showInt)(v.value0) + (": " + renderForeignError(v.value1)));
+      };
+      if (v instanceof ErrorAtProperty) {
+          return "Error at property " + (Data_Show.show(Data_Show.showString)(v.value0) + (": " + renderForeignError(v.value1)));
+      };
+      if (v instanceof TypeMismatch) {
+          return "Type mismatch: expected " + (v.value0 + (", found " + v.value1));
+      };
+      throw new Error("Failed pattern match at Foreign line 72, column 1 - line 72, column 45: " + [ v.constructor.name ]);
+  };
   var fail = function ($107) {
       return Control_Monad_Error_Class.throwError(Control_Monad_Except_Trans.monadThrowExceptT(Data_Identity.monadIdentity))(Data_List_NonEmpty.singleton($107));
   };
@@ -4746,6 +4865,9 @@ var PS = {};
   };
   exports["ForeignError"] = ForeignError;
   exports["TypeMismatch"] = TypeMismatch;
+  exports["ErrorAtIndex"] = ErrorAtIndex;
+  exports["ErrorAtProperty"] = ErrorAtProperty;
+  exports["renderForeignError"] = renderForeignError;
   exports["unsafeReadTagged"] = unsafeReadTagged;
   exports["fail"] = fail;
   exports["unsafeToForeign"] = $foreign.unsafeToForeign;
@@ -4856,6 +4978,9 @@ var PS = {};
           return new Data_Maybe.Just(Data_MediaType_Common.applicationJSON);
       };
       return Data_Maybe.Nothing.value;
+  };                                                                                
+  var printResponseFormatError = function (v) {
+      return Foreign.renderForeignError(v.value0);
   };
   var json = new Json(Control_Category.identity(Control_Category.categoryFn));
   exports["ArrayBuffer"] = $$ArrayBuffer;
@@ -4868,6 +4993,7 @@ var PS = {};
   exports["toResponseType"] = toResponseType;
   exports["toMediaType"] = toMediaType;
   exports["ResponseFormatError"] = ResponseFormatError;
+  exports["printResponseFormatError"] = printResponseFormatError;
 })(PS["Affjax.ResponseFormat"] = PS["Affjax.ResponseFormat"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
@@ -7931,7 +8057,8 @@ var PS = {};
   exports["functorProp"] = functorProp;
 })(PS["Halogen.VDom.DOM.Prop"] = PS["Halogen.VDom.DOM.Prop"] || {});
 (function(exports) {
-    "use strict";
+  // Generated by purs version 0.12.1
+  "use strict";
   var Control_Semigroupoid = PS["Control.Semigroupoid"];
   var DOM_HTML_Indexed_ButtonType = PS["DOM.HTML.Indexed.ButtonType"];
   var DOM_HTML_Indexed_CrossOriginValue = PS["DOM.HTML.Indexed.CrossOriginValue"];
@@ -7968,8 +8095,6 @@ var PS = {};
   var HTML = function (x) {
       return x;
   };
-
-  // | A wrapper for strings which are used as CSS classes.
   var ClassName = function (x) {
       return x;
   };
@@ -7979,24 +8104,18 @@ var PS = {};
   var toPropValue = function (dict) {
       return dict.toPropValue;
   };
-
-  // | Constructs a text node `HTML` value.
   var text = function ($31) {
       return HTML(Halogen_VDom_Types.Text.create($31));
   };
   var stringIsProp = new IsProp(Halogen_VDom_DOM_Prop.propFromString);
-
-  // | A smart constructor for widget slots in the HTML.
   var slot = function ($33) {
       return HTML(Halogen_VDom_Types.Widget.create($33));
   };
   var semigroupClassName = new Data_Semigroup.Semigroup(function (v) {
       return function (v1) {
-          return v + (" " + v1);
+          return ClassName(v + (" " + v1));
       };
   });
-
-  // | Create a HTML property.
   var prop = function (dictIsProp) {
       return function (v) {
           return function ($36) {
@@ -8008,8 +8127,7 @@ var PS = {};
       return n;
   }, ClassName);
   var intIsProp = new IsProp(Halogen_VDom_DOM_Prop.propFromInt);
-
-  // | A smart constructor for HTML elements.
+  var handler = Halogen_VDom_DOM_Prop.Handler.create;
   var element = function (ns) {
       return function (name) {
           return function (props) {
@@ -8027,8 +8145,6 @@ var PS = {};
           };
       };
   });                                                                            
-
-  // | Create a HTML attribute.
   var attr = function (ns) {
       return function (v) {
           return Halogen_VDom_DOM_Prop.Attribute.create(ns)(v);
@@ -8040,6 +8156,7 @@ var PS = {};
   exports["element"] = element;
   exports["prop"] = prop;
   exports["attr"] = attr;
+  exports["handler"] = handler;
   exports["IsProp"] = IsProp;
   exports["toPropValue"] = toPropValue;
   exports["ClassName"] = ClassName;
@@ -8736,7 +8853,22 @@ var PS = {};
   var Data_Semigroup_Foldable = PS["Data.Semigroup.Foldable"];
   var Data_Semigroup_Traversable = PS["Data.Semigroup.Traversable"];
   var Data_Traversable = PS["Data.Traversable"];
-  var Prelude = PS["Prelude"];
+  var Prelude = PS["Prelude"];                 
+  var CoyonedaF = (function () {
+      function CoyonedaF(value0, value1) {
+          this.value0 = value0;
+          this.value1 = value1;
+      };
+      CoyonedaF.create = function (value0) {
+          return function (value1) {
+              return new CoyonedaF(value0, value1);
+          };
+      };
+      return CoyonedaF;
+  })();
+  var Coyoneda = function (x) {
+      return x;
+  };
   var unCoyoneda = function (f) {
       return function (v) {
           return Data_Exists.runExists(function (v1) {
@@ -8744,6 +8876,13 @@ var PS = {};
           })(v);
       };
   };
+  var coyoneda = function (k) {
+      return function (fi) {
+          return Coyoneda(Data_Exists.mkExists(new CoyonedaF(k, fi)));
+      };
+  };
+  exports["Coyoneda"] = Coyoneda;
+  exports["coyoneda"] = coyoneda;
   exports["unCoyoneda"] = unCoyoneda;
 })(PS["Data.Coyoneda"] = PS["Data.Coyoneda"] || {});
 (function(exports) {
@@ -10020,6 +10159,13 @@ var PS = {};
           return HalogenM(Control_Monad_Free.liftF(new Lift(m)));
       };
   });
+  var mkQuery = function (dictEq) {
+      return function (p) {
+          return function ($176) {
+              return HalogenM(Control_Monad_Free.liftF(ChildQuery.create(p)(Data_Coyoneda.coyoneda(Control_Category.identity(Control_Category.categoryFn))($176))));
+          };
+      };
+  };
   var hoist = function (dictFunctor) {
       return function (nat) {
           return function (v) {
@@ -10073,6 +10219,9 @@ var PS = {};
           return Data_Functor.map(functorHalogenM)(Data_Functor.map(Data_Functor.functorFn)(Effect_Aff_Class.liftAff(dictMonadAff)))(Control_Monad_Free.liftF(Fork.create(Halogen_Query_ForkF.fork(a))));
       };
   };
+  var checkSlot = function (p) {
+      return HalogenM(Control_Monad_Free.liftF(new CheckSlot(p, Control_Category.identity(Control_Category.categoryFn))));
+  };
   var applyHalogenM = new Control_Apply.Apply(function () {
       return functorHalogenM;
   }, function (v) {
@@ -10100,6 +10249,18 @@ var PS = {};
   }, function () {
       return bindHalogenM;
   });
+  var monadAskHalogenM = function (dictMonadAsk) {
+      return new Control_Monad_Reader_Class.MonadAsk(function () {
+          return monadHalogenM;
+      }, HalogenM(Control_Monad_Free.liftF(Lift.create(Control_Monad_Reader_Class.ask(dictMonadAsk)))));
+  };
+  var monadEffectHalogenM = function (dictMonadEffect) {
+      return new Effect_Class.MonadEffect(function () {
+          return monadHalogenM;
+      }, function (eff) {
+          return HalogenM(Control_Monad_Free.liftF(Lift.create(Effect_Class.liftEffect(dictMonadEffect)(eff))));
+      });
+  };
   var monadStateHalogenM = new Control_Monad_State_Class.MonadState(function () {
       return monadHalogenM;
   }, function ($180) {
@@ -10118,6 +10279,8 @@ var PS = {};
   exports["GetRef"] = GetRef;
   exports["HalogenAp"] = HalogenAp;
   exports["HalogenM"] = HalogenM;
+  exports["mkQuery"] = mkQuery;
+  exports["checkSlot"] = checkSlot;
   exports["fork"] = fork;
   exports["hoist"] = hoist;
   exports["newtypeHalogenAp"] = newtypeHalogenAp;
@@ -10126,8 +10289,10 @@ var PS = {};
   exports["applicativeHalogenM"] = applicativeHalogenM;
   exports["bindHalogenM"] = bindHalogenM;
   exports["monadHalogenM"] = monadHalogenM;
+  exports["monadEffectHalogenM"] = monadEffectHalogenM;
   exports["monadTransHalogenM"] = monadTransHalogenM;
   exports["monadStateHalogenM"] = monadStateHalogenM;
+  exports["monadAskHalogenM"] = monadAskHalogenM;
 })(PS["Halogen.Query.HalogenM"] = PS["Halogen.Query.HalogenM"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
@@ -10188,6 +10353,19 @@ var PS = {};
           });
       };
   };
+  var lifecycleParentComponent = function (dictOrd) {
+      return function (spec) {
+          return mkComponent({
+              initialState: spec.initialState,
+              render: spec.render,
+              "eval": spec["eval"],
+              receiver: spec.receiver,
+              initializer: spec.initializer,
+              finalizer: spec.finalizer,
+              mkOrdBox: Halogen_Data_OrdBox.mkOrdBox(dictOrd)
+          });
+      };
+  };
   var lifecycleComponent = function (dictBifunctor) {
       return function (spec) {
           return mkComponent({
@@ -10240,24 +10418,12 @@ var PS = {};
               });
           };
       };
-  }; 
-  var component = function (dictBifunctor) {
-      return function (spec) {
-          return lifecycleComponent(dictBifunctor)({
-              initialState: spec.initialState,
-              render: spec.render,
-              "eval": spec["eval"],
-              receiver: spec.receiver,
-              initializer: Data_Maybe.Nothing.value,
-              finalizer: Data_Maybe.Nothing.value
-          });
-      };
   };
   exports["mkComponent"] = mkComponent;
   exports["unComponent"] = unComponent;
-  exports["component"] = component;
   exports["lifecycleComponent"] = lifecycleComponent;
   exports["parentComponent"] = parentComponent;
+  exports["lifecycleParentComponent"] = lifecycleParentComponent;
   exports["hoist"] = hoist;
   exports["mkComponentSlot"] = mkComponentSlot;
   exports["unComponentSlot"] = unComponentSlot;
@@ -10470,7 +10636,13 @@ var PS = {};
   // Generated by purs version 0.12.1
   "use strict";
   var Data_Either = PS["Data.Either"];
-  var Data_Void = PS["Data.Void"];
+  var Data_Void = PS["Data.Void"];                 
+  var in9 = function (v) {
+      return new Data_Either.Right(new Data_Either.Right(new Data_Either.Right(new Data_Either.Right(new Data_Either.Right(new Data_Either.Right(new Data_Either.Right(new Data_Either.Right(new Data_Either.Left(v)))))))));
+  };
+  var in8 = function (v) {
+      return new Data_Either.Right(new Data_Either.Right(new Data_Either.Right(new Data_Either.Right(new Data_Either.Right(new Data_Either.Right(new Data_Either.Right(new Data_Either.Left(v))))))));
+  };
   var in7 = function (v) {
       return new Data_Either.Right(new Data_Either.Right(new Data_Either.Right(new Data_Either.Right(new Data_Either.Right(new Data_Either.Right(new Data_Either.Left(v)))))));
   };
@@ -10490,6 +10662,26 @@ var PS = {};
       return new Data_Either.Right(new Data_Either.Left(v));
   };
   var in1 = Data_Either.Left.create;
+  var at9 = function (b) {
+      return function (f) {
+          return function (y) {
+              if (y instanceof Data_Either.Right && (y.value0 instanceof Data_Either.Right && (y.value0.value0 instanceof Data_Either.Right && (y.value0.value0.value0 instanceof Data_Either.Right && (y.value0.value0.value0.value0 instanceof Data_Either.Right && (y.value0.value0.value0.value0.value0 instanceof Data_Either.Right && (y.value0.value0.value0.value0.value0.value0 instanceof Data_Either.Right && (y.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Either.Right && y.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Either.Left)))))))) {
+                  return f(y.value0.value0.value0.value0.value0.value0.value0.value0.value0);
+              };
+              return b;
+          };
+      };
+  };
+  var at8 = function (b) {
+      return function (f) {
+          return function (y) {
+              if (y instanceof Data_Either.Right && (y.value0 instanceof Data_Either.Right && (y.value0.value0 instanceof Data_Either.Right && (y.value0.value0.value0 instanceof Data_Either.Right && (y.value0.value0.value0.value0 instanceof Data_Either.Right && (y.value0.value0.value0.value0.value0 instanceof Data_Either.Right && (y.value0.value0.value0.value0.value0.value0 instanceof Data_Either.Right && y.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Either.Left))))))) {
+                  return f(y.value0.value0.value0.value0.value0.value0.value0.value0);
+              };
+              return b;
+          };
+      };
+  };
   var at7 = function (b) {
       return function (f) {
           return function (y) {
@@ -10567,6 +10759,8 @@ var PS = {};
   exports["in5"] = in5;
   exports["in6"] = in6;
   exports["in7"] = in7;
+  exports["in8"] = in8;
+  exports["in9"] = in9;
   exports["at1"] = at1;
   exports["at2"] = at2;
   exports["at3"] = at3;
@@ -10574,6 +10768,8 @@ var PS = {};
   exports["at5"] = at5;
   exports["at6"] = at6;
   exports["at7"] = at7;
+  exports["at8"] = at8;
+  exports["at9"] = at9;
 })(PS["Data.Either.Nested"] = PS["Data.Either.Nested"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
@@ -10613,7 +10809,13 @@ var PS = {};
   var Data_Functor_Coproduct = PS["Data.Functor.Coproduct"];
   var Data_Newtype = PS["Data.Newtype"];
   var Data_Void = PS["Data.Void"];
-  var Prelude = PS["Prelude"];
+  var Prelude = PS["Prelude"];                 
+  var in9 = function (v) {
+      return Data_Functor_Coproduct.right(Data_Functor_Coproduct.right(Data_Functor_Coproduct.right(Data_Functor_Coproduct.right(Data_Functor_Coproduct.right(Data_Functor_Coproduct.right(Data_Functor_Coproduct.right(Data_Functor_Coproduct.right(Data_Functor_Coproduct.left(v)))))))));
+  };
+  var in8 = function (v) {
+      return Data_Functor_Coproduct.right(Data_Functor_Coproduct.right(Data_Functor_Coproduct.right(Data_Functor_Coproduct.right(Data_Functor_Coproduct.right(Data_Functor_Coproduct.right(Data_Functor_Coproduct.right(Data_Functor_Coproduct.left(v))))))));
+  };
   var in7 = function (v) {
       return Data_Functor_Coproduct.right(Data_Functor_Coproduct.right(Data_Functor_Coproduct.right(Data_Functor_Coproduct.right(Data_Functor_Coproduct.right(Data_Functor_Coproduct.right(Data_Functor_Coproduct.left(v)))))));
   };
@@ -10633,6 +10835,26 @@ var PS = {};
       return Data_Functor_Coproduct.right(Data_Functor_Coproduct.left(v));
   };
   var in1 = Data_Functor_Coproduct.left;
+  var at9 = function (b) {
+      return function (f) {
+          return function (y) {
+              if (y instanceof Data_Either.Right && (y.value0 instanceof Data_Either.Right && (y.value0.value0 instanceof Data_Either.Right && (y.value0.value0.value0 instanceof Data_Either.Right && (y.value0.value0.value0.value0 instanceof Data_Either.Right && (y.value0.value0.value0.value0.value0 instanceof Data_Either.Right && (y.value0.value0.value0.value0.value0.value0 instanceof Data_Either.Right && (y.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Either.Right && y.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Either.Left)))))))) {
+                  return f(y.value0.value0.value0.value0.value0.value0.value0.value0.value0);
+              };
+              return b;
+          };
+      };
+  };
+  var at8 = function (b) {
+      return function (f) {
+          return function (y) {
+              if (y instanceof Data_Either.Right && (y.value0 instanceof Data_Either.Right && (y.value0.value0 instanceof Data_Either.Right && (y.value0.value0.value0 instanceof Data_Either.Right && (y.value0.value0.value0.value0 instanceof Data_Either.Right && (y.value0.value0.value0.value0.value0 instanceof Data_Either.Right && (y.value0.value0.value0.value0.value0.value0 instanceof Data_Either.Right && y.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Either.Left))))))) {
+                  return f(y.value0.value0.value0.value0.value0.value0.value0.value0);
+              };
+              return b;
+          };
+      };
+  };
   var at7 = function (b) {
       return function (f) {
           return function (y) {
@@ -10710,6 +10932,8 @@ var PS = {};
   exports["in5"] = in5;
   exports["in6"] = in6;
   exports["in7"] = in7;
+  exports["in8"] = in8;
+  exports["in9"] = in9;
   exports["at1"] = at1;
   exports["at2"] = at2;
   exports["at3"] = at3;
@@ -10717,6 +10941,8 @@ var PS = {};
   exports["at5"] = at5;
   exports["at6"] = at6;
   exports["at7"] = at7;
+  exports["at8"] = at8;
+  exports["at9"] = at9;
 })(PS["Data.Functor.Coproduct.Nested"] = PS["Data.Functor.Coproduct.Nested"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
@@ -10727,7 +10953,13 @@ var PS = {};
   var Data_Functor_Coproduct_Nested = PS["Data.Functor.Coproduct.Nested"];
   var Data_Lens = PS["Data.Lens"];
   var Data_Lens_Prism = PS["Data.Lens.Prism"];
-  var Data_Maybe = PS["Data.Maybe"];
+  var Data_Maybe = PS["Data.Maybe"];                 
+  var _Either9 = function (dictChoice) {
+      return Data_Lens_Prism["prism'"](Data_Either_Nested.in9)(Data_Either_Nested.at9(Data_Maybe.Nothing.value)(Data_Maybe.Just.create))(dictChoice);
+  };
+  var _Either8 = function (dictChoice) {
+      return Data_Lens_Prism["prism'"](Data_Either_Nested.in8)(Data_Either_Nested.at8(Data_Maybe.Nothing.value)(Data_Maybe.Just.create))(dictChoice);
+  };
   var _Either7 = function (dictChoice) {
       return Data_Lens_Prism["prism'"](Data_Either_Nested.in7)(Data_Either_Nested.at7(Data_Maybe.Nothing.value)(Data_Maybe.Just.create))(dictChoice);
   };
@@ -10748,6 +10980,12 @@ var PS = {};
   };
   var _Either1 = function (dictChoice) {
       return Data_Lens_Prism["prism'"](Data_Either_Nested.in1)(Data_Either_Nested.at1(Data_Maybe.Nothing.value)(Data_Maybe.Just.create))(dictChoice);
+  };
+  var _Coproduct9 = function (dictChoice) {
+      return Data_Lens_Prism["prism'"](Data_Functor_Coproduct_Nested.in9)(Data_Functor_Coproduct_Nested.at9(Data_Maybe.Nothing.value)(Data_Maybe.Just.create))(dictChoice);
+  };
+  var _Coproduct8 = function (dictChoice) {
+      return Data_Lens_Prism["prism'"](Data_Functor_Coproduct_Nested.in8)(Data_Functor_Coproduct_Nested.at8(Data_Maybe.Nothing.value)(Data_Maybe.Just.create))(dictChoice);
   };
   var _Coproduct7 = function (dictChoice) {
       return Data_Lens_Prism["prism'"](Data_Functor_Coproduct_Nested.in7)(Data_Functor_Coproduct_Nested.at7(Data_Maybe.Nothing.value)(Data_Maybe.Just.create))(dictChoice);
@@ -10784,6 +11022,10 @@ var PS = {};
   exports["_Coproduct6"] = _Coproduct6;
   exports["_Either7"] = _Either7;
   exports["_Coproduct7"] = _Coproduct7;
+  exports["_Either8"] = _Either8;
+  exports["_Coproduct8"] = _Coproduct8;
+  exports["_Either9"] = _Either9;
+  exports["_Coproduct9"] = _Coproduct9;
 })(PS["Halogen.Data.Prism"] = PS["Halogen.Data.Prism"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
@@ -10822,6 +11064,16 @@ var PS = {};
   var injQuery = function (v) {
       return Data_Lens_Prism.review(v.value0(Data_Lens_Internal_Tagged.taggedChoice));
   }; 
+  var cp9 = new ChildPath(function (dictChoice) {
+      return Halogen_Data_Prism._Coproduct9(dictChoice);
+  }, function (dictChoice) {
+      return Halogen_Data_Prism._Either9(dictChoice);
+  });
+  var cp8 = new ChildPath(function (dictChoice) {
+      return Halogen_Data_Prism._Coproduct8(dictChoice);
+  }, function (dictChoice) {
+      return Halogen_Data_Prism._Either8(dictChoice);
+  });
   var cp7 = new ChildPath(function (dictChoice) {
       return Halogen_Data_Prism._Coproduct7(dictChoice);
   }, function (dictChoice) {
@@ -10865,6 +11117,8 @@ var PS = {};
   exports["cp5"] = cp5;
   exports["cp6"] = cp6;
   exports["cp7"] = cp7;
+  exports["cp8"] = cp8;
+  exports["cp9"] = cp9;
   exports["injQuery"] = injQuery;
   exports["injSlot"] = injSlot;
   exports["prjQuery"] = prjQuery;
@@ -10901,13 +11155,15 @@ var PS = {};
   var Web_DOM_Element = PS["Web.DOM.Element"];
   var prop = function (dictIsProp) {
       return Halogen_HTML_Core.prop(dictIsProp);
-  };                                                    
+  };
+  var readOnly = prop(Halogen_HTML_Core.booleanIsProp)("readOnly");
   var required = prop(Halogen_HTML_Core.booleanIsProp)("required");    
   var src = prop(Halogen_HTML_Core.stringIsProp)("src");     
   var tabIndex = prop(Halogen_HTML_Core.intIsProp)("tabIndex");
   var value = prop(Halogen_HTML_Core.stringIsProp)("value");  
   var placeholder = prop(Halogen_HTML_Core.stringIsProp)("placeholder");
-  var href = prop(Halogen_HTML_Core.stringIsProp)("href");
+  var href = prop(Halogen_HTML_Core.stringIsProp)("href");           
+  var disabled = prop(Halogen_HTML_Core.booleanIsProp)("disabled");
   var class_ = function ($13) {
       return prop(Halogen_HTML_Core.stringIsProp)("className")(Data_Newtype.unwrap(Halogen_HTML_Core.newtypeClassName)($13));
   };
@@ -10920,7 +11176,9 @@ var PS = {};
   exports["href"] = href;
   exports["src"] = src;
   exports["value"] = value;
+  exports["disabled"] = disabled;
   exports["required"] = required;
+  exports["readOnly"] = readOnly;
   exports["placeholder"] = placeholder;
   exports["tabIndex"] = tabIndex;
 })(PS["Halogen.HTML.Properties"] = PS["Halogen.HTML.Properties"] || {});
@@ -10941,6 +11199,7 @@ var PS = {};
   var Prelude = PS["Prelude"];
   var Unsafe_Coerce = PS["Unsafe.Coerce"];
   var element = Halogen_HTML_Core.element(Data_Maybe.Nothing.value);
+  var fieldset = element("fieldset");
   var form = element("form");
   var form_ = form([  ]);
   var h2 = element("h2");
@@ -10953,12 +11212,16 @@ var PS = {};
   };
   var input = function (props) {
       return element("input")(props)([  ]);
-  };                         
+  };                   
+  var label = element("label");
   var li = element("li");  
   var nav = element("nav");
   var nav_ = nav([  ]);      
-  var ol = element("ol");    
-  var p = element("p");      
+  var ol = element("ol");        
+  var option = element("option");
+  var option_ = option([  ]);
+  var p = element("p");        
+  var select = element("select");
   var small = element("small");
   var span = element("span");
   var table = element("table");
@@ -10979,6 +11242,7 @@ var PS = {};
   exports["button"] = button;
   exports["div"] = div;
   exports["div_"] = div_;
+  exports["fieldset"] = fieldset;
   exports["form"] = form;
   exports["form_"] = form_;
   exports["h2"] = h2;
@@ -10988,11 +11252,15 @@ var PS = {};
   exports["i"] = i;
   exports["img"] = img;
   exports["input"] = input;
+  exports["label"] = label;
   exports["li"] = li;
   exports["nav"] = nav;
   exports["nav_"] = nav_;
   exports["ol"] = ol;
+  exports["option"] = option;
+  exports["option_"] = option_;
   exports["p"] = p;
+  exports["select"] = select;
   exports["small"] = small;
   exports["span"] = span;
   exports["table"] = table;
@@ -11201,6 +11469,18 @@ var PS = {};
       };
       return Inr;
   })();
+  var Product = (function () {
+      function Product(value0, value1) {
+          this.value0 = value0;
+          this.value1 = value1;
+      };
+      Product.create = function (value0) {
+          return function (value1) {
+              return new Product(value0, value1);
+          };
+      };
+      return Product;
+  })();
   var NoArguments = (function () {
       function NoArguments() {
 
@@ -11230,62 +11510,10 @@ var PS = {};
   exports["NoArguments"] = NoArguments;
   exports["Inl"] = Inl;
   exports["Inr"] = Inr;
+  exports["Product"] = Product;
   exports["Constructor"] = Constructor;
   exports["Argument"] = Argument;
 })(PS["Data.Generic.Rep"] = PS["Data.Generic.Rep"] || {});
-(function(exports) {
-  // Generated by purs version 0.12.1
-  "use strict";
-  var Data_Foldable = PS["Data.Foldable"];
-  var Data_Generic_Rep = PS["Data.Generic.Rep"];
-  var Data_Monoid = PS["Data.Monoid"];
-  var Data_Semigroup = PS["Data.Semigroup"];
-  var Data_Show = PS["Data.Show"];
-  var Data_Symbol = PS["Data.Symbol"];
-  var Prelude = PS["Prelude"];                 
-  var GenericShow = function (genericShow$prime) {
-      this["genericShow'"] = genericShow$prime;
-  };
-  var GenericShowArgs = function (genericShowArgs) {
-      this.genericShowArgs = genericShowArgs;
-  }; 
-  var genericShowArgsArgument = function (dictShow) {
-      return new GenericShowArgs(function (v) {
-          return [ Data_Show.show(dictShow)(v) ];
-      });
-  };
-  var genericShowArgs = function (dict) {
-      return dict.genericShowArgs;
-  };
-  var genericShowConstructor = function (dictGenericShowArgs) {
-      return function (dictIsSymbol) {
-          return new GenericShow(function (v) {
-              var ctor = Data_Symbol.reflectSymbol(dictIsSymbol)(Data_Symbol.SProxy.value);
-              var v1 = genericShowArgs(dictGenericShowArgs)(v);
-              if (v1.length === 0) {
-                  return ctor;
-              };
-              return "(" + (Data_Foldable.intercalate(Data_Foldable.foldableArray)(Data_Monoid.monoidString)(" ")(Data_Semigroup.append(Data_Semigroup.semigroupArray)([ ctor ])(v1)) + ")");
-          });
-      };
-  };
-  var genericShow$prime = function (dict) {
-      return dict["genericShow'"];
-  };
-  var genericShow = function (dictGeneric) {
-      return function (dictGenericShow) {
-          return function (x) {
-              return genericShow$prime(dictGenericShow)(Data_Generic_Rep.from(dictGeneric)(x));
-          };
-      };
-  };
-  exports["GenericShow"] = GenericShow;
-  exports["genericShow"] = genericShow;
-  exports["GenericShowArgs"] = GenericShowArgs;
-  exports["genericShowArgs"] = genericShowArgs;
-  exports["genericShowConstructor"] = genericShowConstructor;
-  exports["genericShowArgsArgument"] = genericShowArgsArgument;
-})(PS["Data.Generic.Rep.Show"] = PS["Data.Generic.Rep.Show"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
   "use strict";
@@ -11614,6 +11842,15 @@ var PS = {};
           })(Data_Function.flip(runRouteParser)(p)(parsePath($241)));
       };
   };
+  var $$boolean = function (v) {
+      if (v === "true") {
+          return new Data_Either.Right(true);
+      };
+      if (v === "false") {
+          return new Data_Either.Right(false);
+      };
+      return new Data_Either.Left("Boolean");
+  };
   var as = function (print) {
       return function (decode) {
           return function (p) {
@@ -11785,6 +12022,7 @@ var PS = {};
   exports["optional"] = optional;
   exports["as"] = as;
   exports["int"] = $$int;
+  exports["boolean"] = $$boolean;
   exports["hash"] = hash;
   exports["end"] = end;
   exports["functorRouteResult"] = functorRouteResult;
@@ -12058,7 +12296,8 @@ var PS = {};
               }, Routing_Duplex_Parser.as(Control_Category.identity(Control_Category.categoryFn))(g)(v.value1));
           };
       };
-  };                                                                                          
+  };
+  var $$boolean = as(Data_Show.show(Data_Show.showBoolean))(Routing_Duplex_Parser["boolean"]);
   var $$int = as(Data_Show.show(Data_Show.showInt))(Routing_Duplex_Parser["int"]);
   var applyRouteDuplex = new Control_Apply.Apply(function () {
       return functorRouteDuplex;
@@ -12085,6 +12324,7 @@ var PS = {};
   exports["optional"] = optional;
   exports["as"] = as;
   exports["int"] = $$int;
+  exports["boolean"] = $$boolean;
   exports["string"] = string;
   exports["record"] = record;
   exports["prop"] = prop;
@@ -12126,9 +12366,22 @@ var PS = {};
       this.gRouteDuplexCtr = gRouteDuplexCtr;
   };
   var noArgs = Control_Applicative.pure(Routing_Duplex.applicativeRouteDuplex)(Data_Generic_Rep.NoArguments.value);
+  var gRouteProduct = new GRouteDuplexCtr(Control_Category.identity(Control_Category.categoryFn));
   var gRouteNoArguments = new GRouteDuplexCtr(Control_Category.identity(Control_Category.categoryFn));
   var gRouteDuplexCtr = function (dict) {
       return dict.gRouteDuplexCtr;
+  };
+  var product = function (dictGRouteDuplexCtr) {
+      return function (v) {
+          return function (l) {
+              var v1 = gRouteDuplexCtr(dictGRouteDuplexCtr)(l);
+              var enc = function (v2) {
+                  return Data_Semigroup.append(Routing_Duplex_Printer.semigroupRoutePrinter)(v.value0(v2.value0))(v1.value0(v2.value1));
+              };
+              var dec = Control_Apply.apply(Routing_Duplex_Parser.applyRouteParser)(Data_Functor.map(Routing_Duplex_Parser.functorRouteParser)(Data_Generic_Rep.Product.create)(Data_Functor.map(Routing_Duplex_Parser.functorRouteParser)(Data_Generic_Rep.Argument)(v.value1)))(v1.value1);
+              return new Routing_Duplex.RouteDuplex(enc, dec);
+          };
+      };
   };
   var gRouteDuplex = function (dict) {
       return dict.gRouteDuplex;
@@ -12184,9 +12437,11 @@ var PS = {};
   exports["sum"] = sum;
   exports["GRouteDuplex"] = GRouteDuplex;
   exports["GRouteDuplexCtr"] = GRouteDuplexCtr;
+  exports["product"] = product;
   exports["noArgs"] = noArgs;
   exports["gRouteSum"] = gRouteSum;
   exports["gRouteConstructor"] = gRouteConstructor;
+  exports["gRouteProduct"] = gRouteProduct;
   exports["gRouteNoArguments"] = gRouteNoArguments;
   exports["gRouteArgument"] = gRouteArgument;
   exports["gRouteAll"] = gRouteAll;
@@ -12220,6 +12475,9 @@ var PS = {};
           return Routing_Duplex.suffix(Routing_Duplex_Generic.gRouteDuplexCtr(dictGRouteDuplexCtr)($6));
       });
   };
+  var gsepProduct = function (dictGRouteDuplexCtr) {
+      return new GSep(Routing_Duplex_Generic.product(dictGRouteDuplexCtr));
+  };
   var gsep = function (dict) {
       return dict.gsep;
   };
@@ -12239,6 +12497,7 @@ var PS = {};
   exports["GParams"] = GParams;
   exports["gsepStringRoute"] = gsepStringRoute;
   exports["gsepRouteString"] = gsepRouteString;
+  exports["gsepProduct"] = gsepProduct;
   exports["gparamsString"] = gparamsString;
 })(PS["Routing.Duplex.Generic.Syntax"] = PS["Routing.Duplex.Generic.Syntax"] || {});
 (function(exports) {
@@ -13057,6 +13316,21 @@ var PS = {};
       : fallback;
   };
 
+  exports._fromCodePointArray = function (singleton) {
+    return hasFromCodePoint
+      ? function (cps) {
+        // Function.prototype.apply will fail for very large second parameters,
+        // so we don't use it for arrays with 10,000 or more entries.
+        if (cps.length < 10e3) {
+          return String.fromCodePoint.apply(String, cps);
+        }
+        return cps.map(singleton).join("");
+      }
+      : function (cps) {
+        return cps.map(singleton).join("");
+      };
+  };
+
   exports._singleton = function (fallback) {
     return hasFromCodePoint ? String.fromCodePoint : fallback;
   };
@@ -13196,7 +13470,8 @@ var PS = {};
       var lead = Data_EuclideanRing.div(Data_EuclideanRing.euclideanRingInt)(v - 65536 | 0)(1024) + 55296 | 0;
       var trail = Data_EuclideanRing.mod(Data_EuclideanRing.euclideanRingInt)(v - 65536 | 0)(1024) + 56320 | 0;
       return fromCharCode(lead) + fromCharCode(trail);
-  };                                                                       
+  };
+  var fromCodePointArray = $foreign._fromCodePointArray(singletonFallback);
   var singleton = $foreign._singleton(singletonFallback);
   var takeFallback = function (n) {
       return function (v) {
@@ -13217,6 +13492,7 @@ var PS = {};
       };
   };
   exports["singleton"] = singleton;
+  exports["fromCodePointArray"] = fromCodePointArray;
   exports["toCodePointArray"] = toCodePointArray;
   exports["uncons"] = uncons;
   exports["length"] = length;
@@ -13360,8 +13636,23 @@ var PS = {};
       };
   };                                                                                          
   var encodeJsonJString = new EncodeJson(Data_Argonaut_Core.fromString);
+  var encodeJsonJBoolean = new EncodeJson(Data_Argonaut_Core.fromBoolean);
+  var encodeJsonInt = new EncodeJson(function ($40) {
+      return Data_Argonaut_Core.fromNumber(Data_Int.toNumber($40));
+  });
   var encodeJson = function (dict) {
       return dict.encodeJson;
+  };
+  var encodeJsonMaybe = function (dictEncodeJson) {
+      return new EncodeJson(function (v) {
+          if (v instanceof Data_Maybe.Nothing) {
+              return Data_Argonaut_Core.jsonNull;
+          };
+          if (v instanceof Data_Maybe.Just) {
+              return encodeJson(dictEncodeJson)(v.value0);
+          };
+          throw new Error("Failed pattern match at Data.Argonaut.Encode.Class line 29, column 1 - line 29, column 65: " + [ v.constructor.name ]);
+      });
   };
   var gEncodeJsonCons = function (dictEncodeJson) {
       return function (dictGEncodeJson) {
@@ -13380,6 +13671,9 @@ var PS = {};
   exports["gEncodeJson"] = gEncodeJson;
   exports["EncodeJson"] = EncodeJson;
   exports["GEncodeJson"] = GEncodeJson;
+  exports["encodeJsonMaybe"] = encodeJsonMaybe;
+  exports["encodeJsonJBoolean"] = encodeJsonJBoolean;
+  exports["encodeJsonInt"] = encodeJsonInt;
   exports["encodeJsonJString"] = encodeJsonJString;
   exports["encodeRecord"] = encodeRecord;
   exports["gEncodeJsonNil"] = gEncodeJsonNil;
@@ -26572,12 +26866,184 @@ var PS = {};
 (function(exports) {
   // Generated by purs version 0.12.1
   "use strict";
+  var Data_Eq = PS["Data.Eq"];
+  var Data_Function = PS["Data.Function"];
+  var Data_Generic_Rep = PS["Data.Generic.Rep"];
+  var Data_Generic_Rep_Show = PS["Data.Generic.Rep.Show"];
+  var Data_Ord = PS["Data.Ord"];
+  var Data_Ordering = PS["Data.Ordering"];
+  var Data_Show = PS["Data.Show"];
+  var Data_Symbol = PS["Data.Symbol"];
+  var Prelude = PS["Prelude"];
+  var Routing_Duplex = PS["Routing.Duplex"];
+  var Routing_Duplex_Generic = PS["Routing.Duplex.Generic"];
+  var Routing_Duplex_Generic_Syntax = PS["Routing.Duplex.Generic.Syntax"];                 
+  var PersonalCenter = (function () {
+      function PersonalCenter() {
+
+      };
+      PersonalCenter.value = new PersonalCenter();
+      return PersonalCenter;
+  })();
+  var AddressEditor = (function () {
+      function AddressEditor() {
+
+      };
+      AddressEditor.value = new AddressEditor();
+      return AddressEditor;
+  })();
+  var MyOrders = (function () {
+      function MyOrders() {
+
+      };
+      MyOrders.value = new MyOrders();
+      return MyOrders;
+  })();
+  var BankCardEditor = (function () {
+      function BankCardEditor() {
+
+      };
+      BankCardEditor.value = new BankCardEditor();
+      return BankCardEditor;
+  })();
+  var AccountInfo = (function () {
+      function AccountInfo() {
+
+      };
+      AccountInfo.value = new AccountInfo();
+      return AccountInfo;
+  })();
+  var AddressSelector = (function () {
+      function AddressSelector() {
+
+      };
+      AddressSelector.value = new AddressSelector();
+      return AddressSelector;
+  })();
+  var BankCardSelector = (function () {
+      function BankCardSelector() {
+
+      };
+      BankCardSelector.value = new BankCardSelector();
+      return BankCardSelector;
+  })();
+  var genericRoute = new Data_Generic_Rep.Generic(function (x) {
+      if (x instanceof PersonalCenter) {
+          return new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value);
+      };
+      if (x instanceof AddressEditor) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value));
+      };
+      if (x instanceof MyOrders) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value)));
+      };
+      if (x instanceof BankCardEditor) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value))));
+      };
+      if (x instanceof AccountInfo) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value)))));
+      };
+      if (x instanceof AddressSelector) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value))))));
+      };
+      if (x instanceof BankCardSelector) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(Data_Generic_Rep.NoArguments.value))))));
+      };
+      throw new Error("Failed pattern match at Yzmall.Data.Route2 line 38, column 8 - line 38, column 49: " + [ x.constructor.name ]);
+  }, function (x) {
+      if (x instanceof Data_Generic_Rep.Inl) {
+          return PersonalCenter.value;
+      };
+      if (x instanceof Data_Generic_Rep.Inr && x.value0 instanceof Data_Generic_Rep.Inl) {
+          return AddressEditor.value;
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0 instanceof Data_Generic_Rep.Inl)) {
+          return MyOrders.value;
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0 instanceof Data_Generic_Rep.Inl))) {
+          return BankCardEditor.value;
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))) {
+          return AccountInfo.value;
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))) {
+          return AddressSelector.value;
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr))))) {
+          return BankCardSelector.value;
+      };
+      throw new Error("Failed pattern match at Yzmall.Data.Route2 line 38, column 8 - line 38, column 49: " + [ x.constructor.name ]);
+  });
+  var routeCodec = Routing_Duplex.root(Routing_Duplex_Generic.sum(genericRoute)(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "PersonalCenter";
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "AddressEditor";
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "MyOrders";
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "BankCardEditor";
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "AccountInfo";
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "AddressSelector";
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "BankCardSelector";
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))))))))({
+      AccountInfo: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("account-info")(Routing_Duplex_Generic.noArgs),
+      PersonalCenter: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("home")(Routing_Duplex_Generic.noArgs),
+      AddressEditor: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("address-editor")(Routing_Duplex_Generic.noArgs),
+      MyOrders: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("my-orders")(Routing_Duplex_Generic.noArgs),
+      BankCardEditor: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("bankcard-editor")(Routing_Duplex_Generic.noArgs),
+      AddressSelector: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("address-selecttor")(Routing_Duplex_Generic.noArgs),
+      BankCardSelector: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("bankcard-selector")(Routing_Duplex_Generic.noArgs)
+  }));        
+  var eqRoute = new Data_Eq.Eq(function (x) {
+      return function (y) {
+          if (x instanceof PersonalCenter && y instanceof PersonalCenter) {
+              return true;
+          };
+          if (x instanceof AddressEditor && y instanceof AddressEditor) {
+              return true;
+          };
+          if (x instanceof MyOrders && y instanceof MyOrders) {
+              return true;
+          };
+          if (x instanceof BankCardEditor && y instanceof BankCardEditor) {
+              return true;
+          };
+          if (x instanceof AccountInfo && y instanceof AccountInfo) {
+              return true;
+          };
+          if (x instanceof AddressSelector && y instanceof AddressSelector) {
+              return true;
+          };
+          if (x instanceof BankCardSelector && y instanceof BankCardSelector) {
+              return true;
+          };
+          return false;
+      };
+  });
+  exports["PersonalCenter"] = PersonalCenter;
+  exports["AddressEditor"] = AddressEditor;
+  exports["MyOrders"] = MyOrders;
+  exports["BankCardEditor"] = BankCardEditor;
+  exports["AccountInfo"] = AccountInfo;
+  exports["AddressSelector"] = AddressSelector;
+  exports["BankCardSelector"] = BankCardSelector;
+  exports["routeCodec"] = routeCodec;
+  exports["genericRoute"] = genericRoute;
+  exports["eqRoute"] = eqRoute;
+})(PS["Yzmall.Data.Route2"] = PS["Yzmall.Data.Route2"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
   var Control_Semigroupoid = PS["Control.Semigroupoid"];
   var Data_Either = PS["Data.Either"];
   var Data_Eq = PS["Data.Eq"];
   var Data_Function = PS["Data.Function"];
   var Data_Generic_Rep = PS["Data.Generic.Rep"];
   var Data_Generic_Rep_Show = PS["Data.Generic.Rep.Show"];
+  var Data_HeytingAlgebra = PS["Data.HeytingAlgebra"];
   var Data_Maybe = PS["Data.Maybe"];
   var Data_Ord = PS["Data.Ord"];
   var Data_Ordering = PS["Data.Ordering"];
@@ -26588,26 +27054,64 @@ var PS = {};
   var Routing_Duplex = PS["Routing.Duplex"];
   var Routing_Duplex_Generic = PS["Routing.Duplex.Generic"];
   var Routing_Duplex_Generic_Syntax = PS["Routing.Duplex.Generic.Syntax"];
-  var Slug = PS["Slug"];                 
-  var Home = (function () {
-      function Home() {
+  var Slug = PS["Slug"];
+  var Yzmall_Data_Route2 = PS["Yzmall.Data.Route2"];                 
+  var NormalHome = (function () {
+      function NormalHome() {
 
       };
-      Home.value = new Home();
+      NormalHome.value = new NormalHome();
+      return NormalHome;
+  })();
+  var LoginHome = (function () {
+      function LoginHome() {
+
+      };
+      LoginHome.value = new LoginHome();
+      return LoginHome;
+  })();
+  var RegisterHome = (function () {
+      function RegisterHome() {
+
+      };
+      RegisterHome.value = new RegisterHome();
+      return RegisterHome;
+  })();
+  var BindAlipay = (function () {
+      function BindAlipay() {
+
+      };
+      BindAlipay.value = new BindAlipay();
+      return BindAlipay;
+  })();
+  var Home = (function () {
+      function Home(value0, value1) {
+          this.value0 = value0;
+          this.value1 = value1;
+      };
+      Home.create = function (value0) {
+          return function (value1) {
+              return new Home(value0, value1);
+          };
+      };
       return Home;
   })();
   var RegularCommodity = (function () {
-      function RegularCommodity() {
-
+      function RegularCommodity(value0) {
+          this.value0 = value0;
       };
-      RegularCommodity.value = new RegularCommodity();
+      RegularCommodity.create = function (value0) {
+          return new RegularCommodity(value0);
+      };
       return RegularCommodity;
   })();
   var SpecialCommodity = (function () {
-      function SpecialCommodity() {
-
+      function SpecialCommodity(value0) {
+          this.value0 = value0;
       };
-      SpecialCommodity.value = new SpecialCommodity();
+      SpecialCommodity.create = function (value0) {
+          return new SpecialCommodity(value0);
+      };
       return SpecialCommodity;
   })();
   var CommodityInfo = (function () {
@@ -26632,13 +27136,6 @@ var PS = {};
       };
       Register.value = new Register();
       return Register;
-  })();
-  var AccountInfo = (function () {
-      function AccountInfo() {
-
-      };
-      AccountInfo.value = new AccountInfo();
-      return AccountInfo;
   })();
   var AboutUs = (function () {
       function AboutUs() {
@@ -26681,19 +27178,88 @@ var PS = {};
       };
       WDFX_ROUTE.value = new WDFX_ROUTE();
       return WDFX_ROUTE;
+  })();
+  var PurchaseConfirm = (function () {
+      function PurchaseConfirm(value0) {
+          this.value0 = value0;
+      };
+      PurchaseConfirm.create = function (value0) {
+          return new PurchaseConfirm(value0);
+      };
+      return PurchaseConfirm;
+  })();
+  var SpecialPurchaseConfirm = (function () {
+      function SpecialPurchaseConfirm(value0) {
+          this.value0 = value0;
+      };
+      SpecialPurchaseConfirm.create = function (value0) {
+          return new SpecialPurchaseConfirm(value0);
+      };
+      return SpecialPurchaseConfirm;
+  })();
+  var PC_ROUTER = (function () {
+      function PC_ROUTER(value0) {
+          this.value0 = value0;
+      };
+      PC_ROUTER.create = function (value0) {
+          return new PC_ROUTER(value0);
+      };
+      return PC_ROUTER;
+  })();
+  var PayOrder = (function () {
+      function PayOrder(value0) {
+          this.value0 = value0;
+      };
+      PayOrder.create = function (value0) {
+          return new PayOrder(value0);
+      };
+      return PayOrder;
   })();                                                          
-  var slug = Routing_Duplex.as(Slug.toString)(function ($114) {
-      return Data_Either.note("Bad slug")(Slug.parse($114));
+  var slug = Routing_Duplex.as(Slug.toString)(function ($285) {
+      return Data_Either.note("Bad slug")(Slug.parse($285));
+  });
+  var showHomeType = new Data_Show.Show(function (v) {
+      if (v instanceof NormalHome) {
+          return "normal";
+      };
+      if (v instanceof LoginHome) {
+          return "login";
+      };
+      if (v instanceof RegisterHome) {
+          return "register";
+      };
+      if (v instanceof BindAlipay) {
+          return "bindAlipay";
+      };
+      throw new Error("Failed pattern match at Yzmall.Data.Route line 45, column 1 - line 45, column 39: " + [ v.constructor.name ]);
+  });
+  var parseType = function (v) {
+      if (v === "login") {
+          return new Data_Maybe.Just(LoginHome.value);
+      };
+      if (v === "register") {
+          return new Data_Maybe.Just(RegisterHome.value);
+      };
+      if (v === "bindAlipay") {
+          return new Data_Maybe.Just(BindAlipay.value);
+      };
+      if (v === "normal") {
+          return new Data_Maybe.Just(NormalHome.value);
+      };
+      return Data_Maybe.Nothing.value;
+  };
+  var hometype = Routing_Duplex.as(Data_Show.show(showHomeType))(function ($286) {
+      return Data_Either.note("Bad type")(parseType($286));
   });
   var genericRoute = new Data_Generic_Rep.Generic(function (x) {
       if (x instanceof Home) {
-          return new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value);
+          return new Data_Generic_Rep.Inl(new Data_Generic_Rep.Product(x.value0, x.value1));
       };
       if (x instanceof RegularCommodity) {
-          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value));
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0));
       };
       if (x instanceof SpecialCommodity) {
-          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value)));
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0)));
       };
       if (x instanceof CommodityInfo) {
           return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0))));
@@ -26704,37 +27270,46 @@ var PS = {};
       if (x instanceof Register) {
           return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value))))));
       };
-      if (x instanceof AccountInfo) {
+      if (x instanceof AboutUs) {
           return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value)))))));
       };
-      if (x instanceof AboutUs) {
+      if (x instanceof ReturnPolicy) {
           return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value))))))));
       };
-      if (x instanceof ReturnPolicy) {
+      if (x instanceof TradeCenter) {
           return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value)))))))));
       };
-      if (x instanceof TradeCenter) {
+      if (x instanceof WDTG_ROUTE) {
           return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value))))))))));
       };
-      if (x instanceof WDTG_ROUTE) {
+      if (x instanceof WDDS_ROUTE) {
           return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value)))))))))));
       };
-      if (x instanceof WDDS_ROUTE) {
+      if (x instanceof WDFX_ROUTE) {
           return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value))))))))))));
       };
-      if (x instanceof WDFX_ROUTE) {
-          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(Data_Generic_Rep.NoArguments.value))))))))))));
+      if (x instanceof PurchaseConfirm) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0)))))))))))));
       };
-      throw new Error("Failed pattern match at Yzmall.Data.Route line 47, column 8 - line 47, column 48: " + [ x.constructor.name ]);
+      if (x instanceof SpecialPurchaseConfirm) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0))))))))))))));
+      };
+      if (x instanceof PC_ROUTER) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0)))))))))))))));
+      };
+      if (x instanceof PayOrder) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(x.value0)))))))))))))));
+      };
+      throw new Error("Failed pattern match at Yzmall.Data.Route line 90, column 8 - line 90, column 48: " + [ x.constructor.name ]);
   }, function (x) {
       if (x instanceof Data_Generic_Rep.Inl) {
-          return Home.value;
+          return new Home(x.value0.value0, x.value0.value1);
       };
       if (x instanceof Data_Generic_Rep.Inr && x.value0 instanceof Data_Generic_Rep.Inl) {
-          return RegularCommodity.value;
+          return new RegularCommodity(x.value0.value0);
       };
       if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0 instanceof Data_Generic_Rep.Inl)) {
-          return SpecialCommodity.value;
+          return new SpecialCommodity(x.value0.value0.value0);
       };
       if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0 instanceof Data_Generic_Rep.Inl))) {
           return new CommodityInfo(x.value0.value0.value0.value0);
@@ -26746,42 +27321,49 @@ var PS = {};
           return Register.value;
       };
       if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))))) {
-          return AccountInfo.value;
-      };
-      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))))) {
           return AboutUs.value;
       };
-      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))))))) {
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))))) {
           return ReturnPolicy.value;
       };
-      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))))))) {
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))))))) {
           return TradeCenter.value;
       };
-      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))))))))) {
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))))))) {
           return WDTG_ROUTE.value;
       };
-      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))))))))) {
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))))))))) {
           return WDDS_ROUTE.value;
       };
-      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr))))))))))) {
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))))))))) {
           return WDFX_ROUTE.value;
       };
-      throw new Error("Failed pattern match at Yzmall.Data.Route line 47, column 8 - line 47, column 48: " + [ x.constructor.name ]);
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))))))))))) {
+          return new PurchaseConfirm(x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0);
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))))))))))) {
+          return new SpecialPurchaseConfirm(x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0);
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))))))))))))) {
+          return new PC_ROUTER(x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0);
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr)))))))))))))) {
+          return new PayOrder(x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0);
+      };
+      throw new Error("Failed pattern match at Yzmall.Data.Route line 90, column 8 - line 90, column 48: " + [ x.constructor.name ]);
   });
   var routeCodec = Routing_Duplex.root(Routing_Duplex_Generic.sum(genericRoute)(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
       return "Home";
-  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+  }))()(Routing_Duplex_Generic.gRouteProduct))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
       return "RegularCommodity";
-  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+  }))()(Routing_Duplex_Generic.gRouteArgument))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
       return "SpecialCommodity";
-  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+  }))()(Routing_Duplex_Generic.gRouteArgument))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
       return "CommodityInfo";
   }))()(Routing_Duplex_Generic.gRouteArgument))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
       return "Login";
   }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
       return "Register";
-  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
-      return "AccountInfo";
   }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
       return "AboutUs";
   }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
@@ -26792,33 +27374,80 @@ var PS = {};
       return "WDTG_ROUTE";
   }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
       return "WDDS_ROUTE";
-  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
       return "WDFX_ROUTE";
-  }))()(Routing_Duplex_Generic.gRouteNoArguments))))))))))))))({
-      Home: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("regular")(Routing_Duplex_Generic.noArgs),
-      RegularCommodity: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("regular")(Routing_Duplex_Generic.noArgs),
-      SpecialCommodity: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("special")(Routing_Duplex_Generic.noArgs),
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "PurchaseConfirm";
+  }))()(Routing_Duplex_Generic.gRouteArgument))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "SpecialPurchaseConfirm";
+  }))()(Routing_Duplex_Generic.gRouteArgument))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "PC_ROUTER";
+  }))()(Routing_Duplex_Generic.gRouteArgument))(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "PayOrder";
+  }))()(Routing_Duplex_Generic.gRouteAll)))))))))))))))))({
+      Home: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteProduct))("home")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepProduct(Routing_Duplex_Generic.gRouteAll))(Routing_Duplex["boolean"](Routing_Duplex.segment))(hometype(Routing_Duplex.segment))),
+      RegularCommodity: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteAll))("regular")(hometype(Routing_Duplex.segment)),
+      SpecialCommodity: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteAll))("special")(hometype(Routing_Duplex.segment)),
       Login: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("login")(Routing_Duplex_Generic.noArgs),
       Register: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("register")(Routing_Duplex_Generic.noArgs),
-      AccountInfo: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("account")(Routing_Duplex_Generic.noArgs),
-      AboutUs: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("about_us")(Routing_Duplex_Generic.noArgs),
-      ReturnPolicy: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("return_policy")(Routing_Duplex_Generic.noArgs),
+      AboutUs: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("about-us")(Routing_Duplex_Generic.noArgs),
+      ReturnPolicy: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("return-policy")(Routing_Duplex_Generic.noArgs),
       CommodityInfo: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteAll))("commodity")(slug(Routing_Duplex.segment)),
       WDTG_ROUTE: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("wdtg")(Routing_Duplex_Generic.noArgs),
       WDDS_ROUTE: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("wdds")(Routing_Duplex_Generic.noArgs),
       WDFX_ROUTE: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("wdfx")(Routing_Duplex_Generic.noArgs),
-      TradeCenter: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("trade_center")(Routing_Duplex_Generic.noArgs)
-  }));              
+      TradeCenter: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("trade-center")(Routing_Duplex_Generic.noArgs),
+      PurchaseConfirm: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteAll))("order")(slug(Routing_Duplex.segment)),
+      SpecialPurchaseConfirm: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteAll))("special-order")(slug(Routing_Duplex.segment)),
+      PC_ROUTER: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteAll))("personal-center")(Routing_Duplex.optional(Yzmall_Data_Route2.routeCodec)),
+      PayOrder: Routing_Duplex_Generic_Syntax.gparams(Routing_Duplex_Generic_Syntax.gparamsString(Routing_Duplex.routeDuplexParams()(Routing_Duplex.buildParamsCons(new Data_Symbol.IsSymbol(function () {
+          return "cardId";
+      }))()()()()(Routing_Duplex.buildParamsCons(new Data_Symbol.IsSymbol(function () {
+          return "commodityId";
+      }))()()()()(Routing_Duplex.buildParamsCons(new Data_Symbol.IsSymbol(function () {
+          return "commodityName";
+      }))()()()()(Routing_Duplex.buildParamsCons(new Data_Symbol.IsSymbol(function () {
+          return "isRegular";
+      }))()()()()(Routing_Duplex.buildParamsCons(new Data_Symbol.IsSymbol(function () {
+          return "orderId";
+      }))()()()()(Routing_Duplex.buildParamsCons(new Data_Symbol.IsSymbol(function () {
+          return "priceDesc";
+      }))()()()()(Routing_Duplex.buildParamsNil)))))))))("pay_order")({
+          isRegular: Routing_Duplex["boolean"],
+          commodityId: Routing_Duplex["int"],
+          priceDesc: Routing_Duplex.string,
+          commodityName: Routing_Duplex.string,
+          orderId: Routing_Duplex["int"],
+          cardId: Routing_Duplex["int"]
+      })
+  }));                 
+  var eqHomeType = new Data_Eq.Eq(function (v) {
+      return function (v1) {
+          if (v instanceof NormalHome && v1 instanceof NormalHome) {
+              return true;
+          };
+          if (v instanceof LoginHome && v1 instanceof LoginHome) {
+              return true;
+          };
+          if (v instanceof RegisterHome && v1 instanceof RegisterHome) {
+              return true;
+          };
+          if (v instanceof BindAlipay && v1 instanceof BindAlipay) {
+              return true;
+          };
+          return false;
+      };
+  });
   var eqRoute = new Data_Eq.Eq(function (x) {
       return function (y) {
           if (x instanceof Home && y instanceof Home) {
-              return true;
+              return x.value0 === y.value0 && Data_Eq.eq(eqHomeType)(x.value1)(y.value1);
           };
           if (x instanceof RegularCommodity && y instanceof RegularCommodity) {
-              return true;
+              return Data_Eq.eq(eqHomeType)(x.value0)(y.value0);
           };
           if (x instanceof SpecialCommodity && y instanceof SpecialCommodity) {
-              return true;
+              return Data_Eq.eq(eqHomeType)(x.value0)(y.value0);
           };
           if (x instanceof CommodityInfo && y instanceof CommodityInfo) {
               return Data_Eq.eq(Slug.eqSlug)(x.value0)(y.value0);
@@ -26827,9 +27456,6 @@ var PS = {};
               return true;
           };
           if (x instanceof Register && y instanceof Register) {
-              return true;
-          };
-          if (x instanceof AccountInfo && y instanceof AccountInfo) {
               return true;
           };
           if (x instanceof AboutUs && y instanceof AboutUs) {
@@ -26850,42 +27476,277 @@ var PS = {};
           if (x instanceof WDFX_ROUTE && y instanceof WDFX_ROUTE) {
               return true;
           };
+          if (x instanceof PurchaseConfirm && y instanceof PurchaseConfirm) {
+              return Data_Eq.eq(Slug.eqSlug)(x.value0)(y.value0);
+          };
+          if (x instanceof SpecialPurchaseConfirm && y instanceof SpecialPurchaseConfirm) {
+              return Data_Eq.eq(Slug.eqSlug)(x.value0)(y.value0);
+          };
+          if (x instanceof PC_ROUTER && y instanceof PC_ROUTER) {
+              return Data_Eq.eq(Data_Maybe.eqMaybe(Yzmall_Data_Route2.eqRoute))(x.value0)(y.value0);
+          };
+          if (x instanceof PayOrder && y instanceof PayOrder) {
+              return x.value0.cardId === y.value0.cardId && x.value0.commodityId === y.value0.commodityId && x.value0.commodityName === y.value0.commodityName && x.value0.isRegular === y.value0.isRegular && x.value0.orderId === y.value0.orderId && x.value0.priceDesc === y.value0.priceDesc;
+          };
           return false;
       };
   });
+  exports["NormalHome"] = NormalHome;
+  exports["LoginHome"] = LoginHome;
+  exports["RegisterHome"] = RegisterHome;
+  exports["BindAlipay"] = BindAlipay;
+  exports["parseType"] = parseType;
   exports["Home"] = Home;
   exports["RegularCommodity"] = RegularCommodity;
   exports["SpecialCommodity"] = SpecialCommodity;
   exports["CommodityInfo"] = CommodityInfo;
   exports["Login"] = Login;
   exports["Register"] = Register;
-  exports["AccountInfo"] = AccountInfo;
   exports["AboutUs"] = AboutUs;
   exports["ReturnPolicy"] = ReturnPolicy;
   exports["TradeCenter"] = TradeCenter;
   exports["WDTG_ROUTE"] = WDTG_ROUTE;
   exports["WDDS_ROUTE"] = WDDS_ROUTE;
   exports["WDFX_ROUTE"] = WDFX_ROUTE;
+  exports["PurchaseConfirm"] = PurchaseConfirm;
+  exports["SpecialPurchaseConfirm"] = SpecialPurchaseConfirm;
+  exports["PC_ROUTER"] = PC_ROUTER;
+  exports["PayOrder"] = PayOrder;
   exports["routeCodec"] = routeCodec;
   exports["slug"] = slug;
+  exports["hometype"] = hometype;
+  exports["showHomeType"] = showHomeType;
+  exports["eqHomeType"] = eqHomeType;
   exports["genericRoute"] = genericRoute;
   exports["eqRoute"] = eqRoute;
 })(PS["Yzmall.Data.Route"] = PS["Yzmall.Data.Route"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
   "use strict";
+  var Control_Monad_Trans_Class = PS["Control.Monad.Trans.Class"];
   var Control_Semigroupoid = PS["Control.Semigroupoid"];
+  var Halogen = PS["Halogen"];
+  var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
+  var Prelude = PS["Prelude"];
+  var Yzmall_Data_Route = PS["Yzmall.Data.Route"];                 
+  var Navigate = function (Monad0, logout, navigate) {
+      this.Monad0 = Monad0;
+      this.logout = logout;
+      this.navigate = navigate;
+  };
+  var navigate = function (dict) {
+      return dict.navigate;
+  };
+  var logout = function (dict) {
+      return dict.logout;
+  };
+  var navigateHalogenM = function (dictNavigate) {
+      return new Navigate(function () {
+          return Halogen_Query_HalogenM.monadHalogenM;
+      }, Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictNavigate.Monad0())(logout(dictNavigate)), function ($1) {
+          return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictNavigate.Monad0())(navigate(dictNavigate)($1));
+      });
+  };
+  exports["logout"] = logout;
+  exports["navigate"] = navigate;
+  exports["Navigate"] = Navigate;
+  exports["navigateHalogenM"] = navigateHalogenM;
+})(PS["Yzmall.Capability.Navigate"] = PS["Yzmall.Capability.Navigate"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Control_Applicative = PS["Control.Applicative"];
+  var Control_Semigroupoid = PS["Control.Semigroupoid"];
+  var Data_Argonaut_Core = PS["Data.Argonaut.Core"];
+  var Data_Argonaut_Decode_Class = PS["Data.Argonaut.Decode.Class"];
+  var Data_Bifunctor = PS["Data.Bifunctor"];
+  var Data_Either = PS["Data.Either"];
+  var Data_Function = PS["Data.Function"];
+  var Data_Functor = PS["Data.Functor"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Data_Semigroup = PS["Data.Semigroup"];
+  var Data_Show = PS["Data.Show"];
+  var Foreign_Object = PS["Foreign.Object"];
+  var Prelude = PS["Prelude"];                 
+  var elaborateFailure = function (s) {
+      return function (e) {
+          var msg = function (m) {
+              return "Failed to decode key '" + (s + ("': " + m));
+          };
+          return Data_Bifunctor.lmap(Data_Either.bifunctorEither)(msg)(e);
+      };
+  };
+  var getField = function (dictDecodeJson) {
+      return function (o) {
+          return function (s) {
+              return Data_Maybe.maybe(Data_Either.Left.create("Expected field " + Data_Show.show(Data_Show.showString)(s)))(function ($9) {
+                  return elaborateFailure(s)(Data_Argonaut_Decode_Class.decodeJson(dictDecodeJson)($9));
+              })(Foreign_Object.lookup(s)(o));
+          };
+      };
+  };
+  exports["getField"] = getField;
+})(PS["Data.Argonaut.Decode.Combinators"] = PS["Data.Argonaut.Decode.Combinators"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Control_Applicative = PS["Control.Applicative"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Semigroupoid = PS["Control.Semigroupoid"];
+  var Data_Argonaut_Core = PS["Data.Argonaut.Core"];
+  var Data_Argonaut_Decode = PS["Data.Argonaut.Decode"];
+  var Data_Argonaut_Decode_Class = PS["Data.Argonaut.Decode.Class"];
+  var Data_Argonaut_Decode_Combinators = PS["Data.Argonaut.Decode.Combinators"];
+  var Data_Either = PS["Data.Either"];
+  var Data_Functor = PS["Data.Functor"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Data_Traversable = PS["Data.Traversable"];
+  var Prelude = PS["Prelude"];
+  var Yzmall_Data_Phone = PS["Yzmall.Data.Phone"];                 
+  var ADMIN = (function () {
+      function ADMIN() {
+
+      };
+      ADMIN.value = new ADMIN();
+      return ADMIN;
+  })();
+  var CUSTOMER = (function () {
+      function CUSTOMER() {
+
+      };
+      CUSTOMER.value = new CUSTOMER();
+      return CUSTOMER;
+  })();
+  var SUPPLIER = (function () {
+      function SUPPLIER() {
+
+      };
+      SUPPLIER.value = new SUPPLIER();
+      return SUPPLIER;
+  })();
+  var mkRole = function (v) {
+      if (v === "ADMIN") {
+          return ADMIN.value;
+      };
+      if (v === "SUPPLIER") {
+          return SUPPLIER.value;
+      };
+      return CUSTOMER.value;
+  };
+  var decodeAccount = function (json) {
+      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Class.decodeJson(Data_Argonaut_Decode_Class.decodeForeignObject(Data_Argonaut_Decode_Class.decodeJsonJson))(json))(function (v) {
+          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("id"))(function (v1) {
+              return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonInt))(v)("inviter"))(function (v2) {
+                  return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("nickname"))(function (v3) {
+                      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonString))(v)("aliPay"))(function (v4) {
+                          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("phone"))(function (v5) {
+                              return Control_Bind.bind(Data_Either.bindEither)(Data_Functor.map(Data_Either.functorEither)(mkRole)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("role")))(function (v6) {
+                                  return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("grade"))(function (v7) {
+                                      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonString))(v)("name"))(function (v8) {
+                                          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonString))(v)("idCard"))(function (v9) {
+                                              return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("gold"))(function (v10) {
+                                                  return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("regularCommodityCost"))(function (v11) {
+                                                      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("specialCommodityCost"))(function (v12) {
+                                                          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("commissionBalance"))(function (v13) {
+                                                              return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("commissionSellFacility"))(function (v14) {
+                                                                  return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("commissionSell"))(function (v15) {
+                                                                      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("rebateBalance"))(function (v16) {
+                                                                          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("rebateSell"))(function (v17) {
+                                                                              return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonInt))(v)("defaultAddress"))(function (v18) {
+                                                                                  return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonInt))(v)("defaultBankCard"))(function (v19) {
+                                                                                      return Control_Applicative.pure(Data_Either.applicativeEither)({
+                                                                                          id: v1,
+                                                                                          inviter: v2,
+                                                                                          aliPay: v4,
+                                                                                          nickname: v3,
+                                                                                          phone: v5,
+                                                                                          role: v6,
+                                                                                          grade: v7,
+                                                                                          name: v8,
+                                                                                          idCard: v9,
+                                                                                          gold: v10,
+                                                                                          regularCommodityCost: v11,
+                                                                                          specialCommodityCost: v12,
+                                                                                          commissionBalance: v13,
+                                                                                          commissionSellFacility: v14,
+                                                                                          commissionSell: v15,
+                                                                                          rebateBalance: v16,
+                                                                                          rebateSell: v17,
+                                                                                          defaultAddress: v18,
+                                                                                          defaultBankCard: v19
+                                                                                      });
+                                                                                  });
+                                                                              });
+                                                                          });
+                                                                      });
+                                                                  });
+                                                              });
+                                                          });
+                                                      });
+                                                  });
+                                              });
+                                          });
+                                      });
+                                  });
+                              });
+                          });
+                      });
+                  });
+              });
+          });
+      });
+  };
+  var decodeArrayAccount = Control_Bind.composeKleisliFlipped(Data_Either.bindEither)(function ($42) {
+      return Data_Traversable.sequence(Data_Traversable.traversableArray)(Data_Either.applicativeEither)(Data_Functor.map(Data_Functor.functorArray)(decodeAccount)($42));
+  })(Data_Argonaut_Decode_Class.decodeJArray);
+  exports["ADMIN"] = ADMIN;
+  exports["CUSTOMER"] = CUSTOMER;
+  exports["SUPPLIER"] = SUPPLIER;
+  exports["decodeArrayAccount"] = decodeArrayAccount;
+  exports["decodeAccount"] = decodeAccount;
+  exports["mkRole"] = mkRole;
+})(PS["Yzmall.Data.Account"] = PS["Yzmall.Data.Account"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Control_Applicative = PS["Control.Applicative"];
+  var Control_Apply = PS["Control.Apply"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Monad_Reader = PS["Control.Monad.Reader"];
+  var Control_Monad_Reader_Class = PS["Control.Monad.Reader.Class"];
+  var Control_Semigroupoid = PS["Control.Semigroupoid"];
+  var Data_Function = PS["Data.Function"];
   var Data_Maybe = PS["Data.Maybe"];
   var Data_Semigroup = PS["Data.Semigroup"];
   var Data_Unit = PS["Data.Unit"];
+  var Effect_Class = PS["Effect.Class"];
+  var Effect_Ref = PS["Effect.Ref"];
   var Halogen_HTML = PS["Halogen.HTML"];
   var Halogen_HTML_Core = PS["Halogen.HTML.Core"];
   var Halogen_HTML_Properties = PS["Halogen.HTML.Properties"];
   var Prelude = PS["Prelude"];
   var Routing_Duplex = PS["Routing.Duplex"];
-  var Yzmall_Data_Route = PS["Yzmall.Data.Route"];
-  var safeHref = function ($6) {
-      return Halogen_HTML_Properties.href("#" + Routing_Duplex.print(Yzmall_Data_Route.routeCodec)($6));
+  var Yzmall_Capability_Navigate = PS["Yzmall.Capability.Navigate"];
+  var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
+  var Yzmall_Data_Route = PS["Yzmall.Data.Route"];                 
+  var whenElem = function (cond) {
+      return function (f) {
+          if (cond) {
+              return f(Data_Unit.unit);
+          };
+          return Halogen_HTML_Core.text("");
+      };
+  };
+  var safeHref = function ($19) {
+      return Halogen_HTML_Properties.href("#" + Routing_Duplex.print(Yzmall_Data_Route.routeCodec)($19));
+  };
+  var maybeElemArray = function (v) {
+      return function (v1) {
+          if (v instanceof Data_Maybe.Just) {
+              return v1(v.value0);
+          };
+          return [ Halogen_HTML_Core.text("") ];
+      };
   };
   var maybeElem = function (v) {
       return function (v1) {
@@ -26895,8 +27756,33 @@ var PS = {};
           return Halogen_HTML_Core.text("");
       };
   };
+  var guardAccount = function (dictMonadEffect) {
+      return function (dictMonadAsk) {
+          return function (dictNavigate) {
+              return Control_Bind.bind((dictMonadAsk.Monad0()).Bind1())(Control_Bind.bind((dictMonadAsk.Monad0()).Bind1())(Control_Monad_Reader_Class.asks(dictMonadAsk)(function (v) {
+                  return v.currentAccount;
+              }))(function ($20) {
+                  return Effect_Class.liftEffect(dictMonadEffect)(Effect_Ref.read($20));
+              }))(function (v) {
+                  if (v instanceof Data_Maybe.Nothing) {
+                      return Control_Apply.applySecond(((dictMonadAsk.Monad0()).Bind1()).Apply0())(Yzmall_Capability_Navigate.logout(dictNavigate))(Control_Applicative.pure((dictMonadAsk.Monad0()).Applicative0())(Data_Maybe.Nothing.value));
+                  };
+                  if (v instanceof Data_Maybe.Just) {
+                      if (v.value0.aliPay instanceof Data_Maybe.Nothing) {
+                          return Control_Apply.applySecond(((dictMonadAsk.Monad0()).Bind1()).Apply0())(Yzmall_Capability_Navigate.navigate(dictNavigate)(new Yzmall_Data_Route.RegularCommodity(Yzmall_Data_Route.BindAlipay.value)))(Control_Applicative.pure((dictMonadAsk.Monad0()).Applicative0())(new Data_Maybe.Just(v.value0)));
+                      };
+                      return Control_Applicative.pure((dictMonadAsk.Monad0()).Applicative0())(new Data_Maybe.Just(v.value0));
+                  };
+                  throw new Error("Failed pattern match at Conduit.Component.Utils line 52, column 58 - line 57, column 38: " + [ v.constructor.name ]);
+              });
+          };
+      };
+  };
   exports["safeHref"] = safeHref;
   exports["maybeElem"] = maybeElem;
+  exports["maybeElemArray"] = maybeElemArray;
+  exports["whenElem"] = whenElem;
+  exports["guardAccount"] = guardAccount;
 })(PS["Conduit.Component.Utils"] = PS["Conduit.Component.Utils"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
@@ -26934,41 +27820,6 @@ var PS = {};
   exports["MonadFork"] = MonadFork;
   exports["monadForkAff"] = monadForkAff;
 })(PS["Control.Monad.Fork.Class"] = PS["Control.Monad.Fork.Class"] || {});
-(function(exports) {
-  // Generated by purs version 0.12.1
-  "use strict";
-  var Control_Applicative = PS["Control.Applicative"];
-  var Control_Semigroupoid = PS["Control.Semigroupoid"];
-  var Data_Argonaut_Core = PS["Data.Argonaut.Core"];
-  var Data_Argonaut_Decode_Class = PS["Data.Argonaut.Decode.Class"];
-  var Data_Bifunctor = PS["Data.Bifunctor"];
-  var Data_Either = PS["Data.Either"];
-  var Data_Function = PS["Data.Function"];
-  var Data_Functor = PS["Data.Functor"];
-  var Data_Maybe = PS["Data.Maybe"];
-  var Data_Semigroup = PS["Data.Semigroup"];
-  var Data_Show = PS["Data.Show"];
-  var Foreign_Object = PS["Foreign.Object"];
-  var Prelude = PS["Prelude"];                 
-  var elaborateFailure = function (s) {
-      return function (e) {
-          var msg = function (m) {
-              return "Failed to decode key '" + (s + ("': " + m));
-          };
-          return Data_Bifunctor.lmap(Data_Either.bifunctorEither)(msg)(e);
-      };
-  };
-  var getField = function (dictDecodeJson) {
-      return function (o) {
-          return function (s) {
-              return Data_Maybe.maybe(Data_Either.Left.create("Expected field " + Data_Show.show(Data_Show.showString)(s)))(function ($9) {
-                  return elaborateFailure(s)(Data_Argonaut_Decode_Class.decodeJson(dictDecodeJson)($9));
-              })(Foreign_Object.lookup(s)(o));
-          };
-      };
-  };
-  exports["getField"] = getField;
-})(PS["Data.Argonaut.Decode.Combinators"] = PS["Data.Argonaut.Decode.Combinators"] || {});
 (function(exports) {
     "use strict";
 
@@ -29045,6 +29896,70 @@ var PS = {};
   exports["format"] = format;
   exports["formatDateTime"] = formatDateTime;
 })(PS["Data.Formatter.DateTime"] = PS["Data.Formatter.DateTime"] || {});
+(function(exports) {function wrap(method) {
+      return function(d) {
+          return function(num) {
+              return method.apply(num, [d]);
+          };
+      };
+  }
+
+  exports.toPrecisionNative = wrap(Number.prototype.toPrecision);
+  exports.toFixedNative = wrap(Number.prototype.toFixed);
+  exports.toExponentialNative = wrap(Number.prototype.toExponential);
+})(PS["Data.Number.Format"] = PS["Data.Number.Format"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var $foreign = PS["Data.Number.Format"];
+  var Control_Semigroupoid = PS["Control.Semigroupoid"];
+  var Data_Ord = PS["Data.Ord"];
+  var Prelude = PS["Prelude"];                 
+  var Precision = (function () {
+      function Precision(value0) {
+          this.value0 = value0;
+      };
+      Precision.create = function (value0) {
+          return new Precision(value0);
+      };
+      return Precision;
+  })();
+  var Fixed = (function () {
+      function Fixed(value0) {
+          this.value0 = value0;
+      };
+      Fixed.create = function (value0) {
+          return new Fixed(value0);
+      };
+      return Fixed;
+  })();
+  var Exponential = (function () {
+      function Exponential(value0) {
+          this.value0 = value0;
+      };
+      Exponential.create = function (value0) {
+          return new Exponential(value0);
+      };
+      return Exponential;
+  })();
+  var toStringWith = function (v) {
+      if (v instanceof Precision) {
+          return $foreign.toPrecisionNative(v.value0);
+      };
+      if (v instanceof Fixed) {
+          return $foreign.toFixedNative(v.value0);
+      };
+      if (v instanceof Exponential) {
+          return $foreign.toExponentialNative(v.value0);
+      };
+      throw new Error("Failed pattern match at Data.Number.Format line 59, column 1 - line 59, column 40: " + [ v.constructor.name ]);
+  };
+  var fixed = function ($6) {
+      return Fixed.create(Data_Ord.clamp(Data_Ord.ordInt)(0)(20)($6));
+  };
+  exports["fixed"] = fixed;
+  exports["toStringWith"] = toStringWith;
+})(PS["Data.Number.Format"] = PS["Data.Number.Format"] || {});
 (function(exports) {
     "use strict";
 
@@ -30068,8 +30983,10 @@ var PS = {};
   // Generated by purs version 0.12.1
   "use strict";
   var Web_Event_Event = PS["Web.Event.Event"];
+  var input = "input";
   var domcontentloaded = "DOMContentLoaded";
   exports["domcontentloaded"] = domcontentloaded;
+  exports["input"] = input;
 })(PS["Web.HTML.Event.EventTypes"] = PS["Web.HTML.Event.EventTypes"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
@@ -30155,21 +31072,113 @@ var PS = {};
   var Halogen_Query_InputF = PS["Halogen.Query.InputF"];
   var Prelude = PS["Prelude"];
   var Web_HTML_HTMLElement = PS["Web.HTML.HTMLElement"];
+  var query = function (dictEq) {
+      return function (p) {
+          return function (q) {
+              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Halogen_Query_HalogenM.checkSlot(p))(function (v) {
+                  if (v) {
+                      return Data_Functor.map(Halogen_Query_HalogenM.functorHalogenM)(Data_Maybe.Just.create)(Halogen_Query_HalogenM.mkQuery(dictEq)(p)(q));
+                  };
+                  return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Maybe.Nothing.value);
+              });
+          };
+      };
+  };
+  var query$prime = function (dictEq) {
+      return function (path) {
+          return function (p) {
+              return function (q) {
+                  return query(dictEq)(Halogen_Component_ChildPath.injSlot(path)(p))(Halogen_Component_ChildPath.injQuery(path)(q));
+              };
+          };
+      };
+  };
   var action = function (act) {
       return act(Data_Unit.unit);
   };
   exports["action"] = action;
+  exports["query"] = query;
+  exports["query'"] = query$prime;
 })(PS["Halogen.Query"] = PS["Halogen.Query"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Web_Event_Event = PS["Web.Event.Event"];
+  var click = "click";
+  exports["click"] = click;
+})(PS["Web.UIEvent.MouseEvent.EventTypes"] = PS["Web.UIEvent.MouseEvent.EventTypes"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Monad_Except = PS["Control.Monad.Except"];
+  var Control_Monad_Except_Trans = PS["Control.Monad.Except.Trans"];
+  var Control_Semigroupoid = PS["Control.Semigroupoid"];
+  var Data_Either = PS["Data.Either"];
+  var Data_Function = PS["Data.Function"];
+  var Data_Functor = PS["Data.Functor"];
+  var Data_Identity = PS["Data.Identity"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Foreign = PS["Foreign"];
+  var Foreign_Index = PS["Foreign.Index"];
+  var Halogen_HTML_Core = PS["Halogen.HTML.Core"];
+  var Halogen_HTML_Properties = PS["Halogen.HTML.Properties"];
+  var Halogen_Query = PS["Halogen.Query"];
+  var Halogen_Query_InputF = PS["Halogen.Query.InputF"];
+  var Prelude = PS["Prelude"];
+  var Unsafe_Coerce = PS["Unsafe.Coerce"];
+  var Web_Clipboard_ClipboardEvent = PS["Web.Clipboard.ClipboardEvent"];
+  var Web_Clipboard_ClipboardEvent_EventTypes = PS["Web.Clipboard.ClipboardEvent.EventTypes"];
+  var Web_Event_Event = PS["Web.Event.Event"];
+  var Web_HTML_Event_DragEvent = PS["Web.HTML.Event.DragEvent"];
+  var Web_HTML_Event_DragEvent_EventTypes = PS["Web.HTML.Event.DragEvent.EventTypes"];
+  var Web_HTML_Event_EventTypes = PS["Web.HTML.Event.EventTypes"];
+  var Web_TouchEvent_TouchEvent = PS["Web.TouchEvent.TouchEvent"];
+  var Web_UIEvent_FocusEvent = PS["Web.UIEvent.FocusEvent"];
+  var Web_UIEvent_FocusEvent_EventTypes = PS["Web.UIEvent.FocusEvent.EventTypes"];
+  var Web_UIEvent_KeyboardEvent = PS["Web.UIEvent.KeyboardEvent"];
+  var Web_UIEvent_KeyboardEvent_EventTypes = PS["Web.UIEvent.KeyboardEvent.EventTypes"];
+  var Web_UIEvent_MouseEvent = PS["Web.UIEvent.MouseEvent"];
+  var Web_UIEvent_MouseEvent_EventTypes = PS["Web.UIEvent.MouseEvent.EventTypes"];
+  var Web_UIEvent_WheelEvent = PS["Web.UIEvent.WheelEvent"];
+  var Web_UIEvent_WheelEvent_EventTypes = PS["Web.UIEvent.WheelEvent.EventTypes"];
+  var mouseHandler = Unsafe_Coerce.unsafeCoerce;
+  var input_ = function (f) {
+      return function (v) {
+          return Data_Maybe.Just.create(Halogen_Query.action(f));
+      };
+  };
+  var input = function (f) {
+      return function (x) {
+          return Data_Maybe.Just.create(Halogen_Query.action(f(x)));
+      };
+  };
+  var handler = function (et) {
+      return function ($1) {
+          return Halogen_HTML_Core.handler(et)(Data_Functor.map(Data_Functor.functorFn)(Data_Functor.map(Data_Maybe.functorMaybe)(Halogen_Query_InputF.Query.create))($1));
+      };
+  };                                                       
+  var onClick = function ($2) {
+      return handler(Web_UIEvent_MouseEvent_EventTypes.click)(mouseHandler($2));
+  };                                                     
+  var onInput = handler(Web_HTML_Event_EventTypes.input);
+  exports["input"] = input;
+  exports["input_"] = input_;
+  exports["handler"] = handler;
+  exports["onInput"] = onInput;
+  exports["onClick"] = onClick;
+})(PS["Halogen.HTML.Events"] = PS["Halogen.HTML.Events"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
   "use strict";
   var Halogen_HTML = PS["Halogen.HTML"];
   var Halogen_HTML_Core = PS["Halogen.HTML.Core"];
+  var w50 = "w-50";
   var w25 = "w-25";
   var w100 = "w-100";               
   var textWhite = "text-white";        
   var textTruncate = "text-truncate";
-  var textDark = "text-dark";        
+  var textDanger = "text-danger";    
   var tableStriped = "table-striped";
   var tableDark = "table-dark";    
   var table = "table";
@@ -30182,7 +31191,6 @@ var PS = {};
   var py2 = "py-2";
   var py1 = "py-1";
   var px5 = "px-5";
-  var px4 = "px-4";
   var px3 = "px-3";
   var px2 = "px-2";
   var px1 = "px-1";
@@ -30192,8 +31200,10 @@ var PS = {};
   var pt0 = "pt-0";
   var pr1 = "pr-1";
   var pr0 = "pr-0";
+  var pl2 = "pl-2";
   var pl1 = "pl-1";
   var pl0 = "pl-0";
+  var pb1 = "pb-1";
   var p0 = "p-0";              
   var navbarTogglerIcon = "navbar-toggler-icon";
   var navbarToggler = "navbar-toggler";
@@ -30213,9 +31223,15 @@ var PS = {};
   var mxAuto = "mx-auto";
   var mx0 = "mx-0";
   var mw100 = "mw-100";
+  var mtAuto = "mt-auto";
+  var mt3 = "mt-3";
   var mt2 = "mt-2";
+  var mrAuto = "mr-auto";
   var mr4 = "mr-4";
   var mr3 = "mr-3";
+  var mr2 = "mr-2";
+  var mr1 = "mr-1";
+  var mr0 = "mr-0";
   var modalTitle = "modal-title";
   var modalHeader = "modal-header";
   var modalFooter = "modal-footer";                 
@@ -30224,7 +31240,6 @@ var PS = {};
   var modalBody = "modal-body";        
   var modal = "modal";
   var mlAuto = "ml-auto";
-  var ml4 = "ml-4";
   var ml3 = "ml-3";
   var ml2 = "ml-2";   
   var mbAuto = "mb-auto";
@@ -30232,11 +31247,13 @@ var PS = {};
   var mb3 = "mb-3";
   var mb2 = "mb-2";
   var mb1 = "mb-1";
-  var m0 = "m-0";                                      
-  var listGroupItemLight = "list-group-item-light";  
+  var mb0 = "mb-0";
+  var m0 = "m-0";                                
+  var listGroupItemDark = "list-group-item-dark";    
   var listGroupItemAction = "list-group-item-action";
   var listGroupItem = "list-group-item";  
-  var listGroup = "list-group";                 
+  var listGroup = "list-group";                     
+  var justifyContentEnd = "justify-content-end";
   var justifyContentCenter = "justify-content-center";
   var justifyContentBetween = "justify-content-between";
   var invalidFeedback = "invalid-feedback";
@@ -30244,30 +31261,42 @@ var PS = {};
   var inputGroupPrepend = "input-group-prepend";
   var inputGroup = "input-group";
   var h3 = "h3";
-  var h100 = "h-100";      
-  var formInline = "form-inline";
+  var h100 = "h-100";            
   var formGroup = "form-group";             
   var formControl = "form-control";
+  var formCheckLabel = "form-check-label";
+  var formCheckInput = "form-check-input";
+  var formCheckInline = "form-check-inline";
+  var formCheck = "form-check";
+  var fontWeightNormal = "font-weight-normal";
+  var fontWeightBold = "font-weight-bold";
   var floatRight = "float-right";
   var floatLeft = "float-left";             
-  var flexWrap = "flex-wrap";                   
+  var flexWrap = "flex-wrap";       
+  var flexRowReverse = "flex-row-reverse";
+  var flexRow = "flex-row";                     
   var flexColumn = "flex-column";
   var fixedBottom = "fixed-bottom";
   var fade = "fade";     
   var dNone = "d-none";    
   var dFlex = "d-flex";
-  var dBlock = "d-block";                
+  var dBlock = "d-block";                 
+  var customSelect = "custom-select";    
   var containerFluid = "container-fluid";
   var container = "container";  
   var collapse = "collapse";
   var colMd8 = "col-md-8";
   var colMd6 = "col-md-6";
-  var colMd4 = "col-md-4";  
+  var colMd4 = "col-md-4";
+  var colMd3 = "col-md-3";
+  var colMd2 = "col-md-2";  
   var colMd11 = "col-md-11";
   var colMd1 = "col-md-1"; 
   var col9 = "col-9";
+  var col8 = "col-8";
   var col7 = "col-7";
   var col6 = "col-6";
+  var col5 = "col-5";
   var col4 = "col-4";
   var col3 = "col-3";
   var col12 = "col-12";
@@ -30281,18 +31310,16 @@ var PS = {};
   var carouselControlNext = "carousel-control-next";
   var carousel = "carousel";   
   var cardText = "card-text";
-  var cardImgTop = "card-img-top"; 
+  var cardImgTop = "card-img-top";
+  var cardImgOverlay = "card-img-overlay";
   var cardBody = "card-body";
   var card = "card";                      
   var btnOutlineDanger = "btn-outline-danger";
-  var btnGroupToggle = "btn-group-toggle";
   var btnGroup = "btn-group";
   var btnDark = "btn-dark";
   var btnDanger = "btn-danger";
   var btnBlock = "btn-block";
-  var btn = "btn";                    
-  var borderRight = "border-right"; 
-  var borderLeft = "border-left";       
+  var btn = "btn";                      
   var borderBottom = "border-bottom";
   var border0 = "border-0";    
   var bgTransparent = "bg-transparent";
@@ -30309,17 +31336,15 @@ var PS = {};
   exports["bgTransparent"] = bgTransparent;
   exports["border0"] = border0;
   exports["borderBottom"] = borderBottom;
-  exports["borderLeft"] = borderLeft;
-  exports["borderRight"] = borderRight;
   exports["btn"] = btn;
   exports["btnBlock"] = btnBlock;
   exports["btnDanger"] = btnDanger;
   exports["btnDark"] = btnDark;
   exports["btnGroup"] = btnGroup;
-  exports["btnGroupToggle"] = btnGroupToggle;
   exports["btnOutlineDanger"] = btnOutlineDanger;
   exports["card"] = card;
   exports["cardBody"] = cardBody;
+  exports["cardImgOverlay"] = cardImgOverlay;
   exports["cardImgTop"] = cardImgTop;
   exports["cardText"] = cardText;
   exports["carousel"] = carousel;
@@ -30334,29 +31359,41 @@ var PS = {};
   exports["col12"] = col12;
   exports["col3"] = col3;
   exports["col4"] = col4;
+  exports["col5"] = col5;
   exports["col6"] = col6;
   exports["col7"] = col7;
+  exports["col8"] = col8;
   exports["col9"] = col9;
   exports["colMd1"] = colMd1;
   exports["colMd11"] = colMd11;
+  exports["colMd2"] = colMd2;
+  exports["colMd3"] = colMd3;
   exports["colMd4"] = colMd4;
   exports["colMd6"] = colMd6;
   exports["colMd8"] = colMd8;
   exports["collapse"] = collapse;
   exports["container"] = container;
   exports["containerFluid"] = containerFluid;
+  exports["customSelect"] = customSelect;
   exports["dBlock"] = dBlock;
   exports["dFlex"] = dFlex;
   exports["dNone"] = dNone;
   exports["fade"] = fade;
   exports["fixedBottom"] = fixedBottom;
   exports["flexColumn"] = flexColumn;
+  exports["flexRow"] = flexRow;
+  exports["flexRowReverse"] = flexRowReverse;
   exports["flexWrap"] = flexWrap;
   exports["floatLeft"] = floatLeft;
   exports["floatRight"] = floatRight;
+  exports["fontWeightBold"] = fontWeightBold;
+  exports["fontWeightNormal"] = fontWeightNormal;
+  exports["formCheck"] = formCheck;
+  exports["formCheckInline"] = formCheckInline;
+  exports["formCheckInput"] = formCheckInput;
+  exports["formCheckLabel"] = formCheckLabel;
   exports["formControl"] = formControl;
   exports["formGroup"] = formGroup;
-  exports["formInline"] = formInline;
   exports["h100"] = h100;
   exports["h3"] = h3;
   exports["inputGroup"] = inputGroup;
@@ -30365,11 +31402,13 @@ var PS = {};
   exports["invalidFeedback"] = invalidFeedback;
   exports["justifyContentBetween"] = justifyContentBetween;
   exports["justifyContentCenter"] = justifyContentCenter;
+  exports["justifyContentEnd"] = justifyContentEnd;
   exports["listGroup"] = listGroup;
   exports["listGroupItem"] = listGroupItem;
   exports["listGroupItemAction"] = listGroupItemAction;
-  exports["listGroupItemLight"] = listGroupItemLight;
+  exports["listGroupItemDark"] = listGroupItemDark;
   exports["m0"] = m0;
+  exports["mb0"] = mb0;
   exports["mb1"] = mb1;
   exports["mb2"] = mb2;
   exports["mb3"] = mb3;
@@ -30377,7 +31416,6 @@ var PS = {};
   exports["mbAuto"] = mbAuto;
   exports["ml2"] = ml2;
   exports["ml3"] = ml3;
-  exports["ml4"] = ml4;
   exports["mlAuto"] = mlAuto;
   exports["modal"] = modal;
   exports["modalBody"] = modalBody;
@@ -30386,9 +31424,15 @@ var PS = {};
   exports["modalFooter"] = modalFooter;
   exports["modalHeader"] = modalHeader;
   exports["modalTitle"] = modalTitle;
+  exports["mr0"] = mr0;
+  exports["mr1"] = mr1;
+  exports["mr2"] = mr2;
   exports["mr3"] = mr3;
   exports["mr4"] = mr4;
+  exports["mrAuto"] = mrAuto;
   exports["mt2"] = mt2;
+  exports["mt3"] = mt3;
+  exports["mtAuto"] = mtAuto;
   exports["mw100"] = mw100;
   exports["mx0"] = mx0;
   exports["mxAuto"] = mxAuto;
@@ -30408,8 +31452,10 @@ var PS = {};
   exports["navbarToggler"] = navbarToggler;
   exports["navbarTogglerIcon"] = navbarTogglerIcon;
   exports["p0"] = p0;
+  exports["pb1"] = pb1;
   exports["pl0"] = pl0;
   exports["pl1"] = pl1;
+  exports["pl2"] = pl2;
   exports["pr0"] = pr0;
   exports["pr1"] = pr1;
   exports["pt0"] = pt0;
@@ -30419,7 +31465,6 @@ var PS = {};
   exports["px1"] = px1;
   exports["px2"] = px2;
   exports["px3"] = px3;
-  exports["px4"] = px4;
   exports["px5"] = px5;
   exports["py1"] = py1;
   exports["py2"] = py2;
@@ -30432,11 +31477,12 @@ var PS = {};
   exports["table"] = table;
   exports["tableDark"] = tableDark;
   exports["tableStriped"] = tableStriped;
-  exports["textDark"] = textDark;
+  exports["textDanger"] = textDanger;
   exports["textTruncate"] = textTruncate;
   exports["textWhite"] = textWhite;
   exports["w100"] = w100;
   exports["w25"] = w25;
+  exports["w50"] = w50;
 })(PS["Halogen.Themes.Bootstrap4"] = PS["Halogen.Themes.Bootstrap4"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
@@ -30896,7 +31942,8 @@ var PS = {};
   }
 })(PS["Yzmall.Api.Request"] = PS["Yzmall.Api.Request"] || {});
 (function(exports) {
-    "use strict";
+  // Generated by purs version 0.12.1
+  "use strict";
   var Affjax_RequestBody = PS["Affjax.RequestBody"];
   var Control_Applicative = PS["Control.Applicative"];
   var Control_Bind = PS["Control.Bind"];
@@ -30976,7 +32023,7 @@ var PS = {};
               return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("name"))(function (v2) {
                   return Control_Bind.bind(Data_Either.bindEither)(Data_Functor.map(Data_Either.functorEither)(genCategory)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("category")))(function (v3) {
                       return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("price"))(function (v4) {
-                          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("rebateACT"))(function (v5) {
+                          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("rebateMYT"))(function (v5) {
                               return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("gold"))(function (v6) {
                                   return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("stock"))(function (v7) {
                                       return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("sale"))(function (v8) {
@@ -30990,7 +32037,7 @@ var PS = {};
                                                                   name: v2,
                                                                   category: v3,
                                                                   price: v4,
-                                                                  rebateACT: v5,
+                                                                  rebateMYT: v5,
                                                                   gold: v6,
                                                                   stock: v7,
                                                                   sale: v8,
@@ -31029,18 +32076,7 @@ var PS = {};
   exports["showCommodityCategory"] = showCommodityCategory;
 })(PS["Yzmall.Data.Commodity"] = PS["Yzmall.Data.Commodity"] || {});
 (function(exports) {
-  
-  // | Conduit uses a REST API for resource management. This module defines endpoints in a data type
-  // | which ensures invalid endpoints fail to compile. Since the library we use to perform requests
-  // | uses string URLs, we need to be able to write our endpoints to string values. We'll use the
-  // | `routing-duplex` library to get this string conversion for free.
-  // |
-  // | In a larger application we might code-generate this module from an Open API or Swagger 
-  // | spec, or split it into several separate modules.
-  // |
-  // | This module takes the same approach as the `Conduit.Data.Route` module. For a more in-depth  
-  // | treatment of representing endpoints and routes as a data type that can be parsed from and  
-  // | printed to `String` values, I recommend reading the documentation in that module.
+  // Generated by purs version 0.12.1
   "use strict";
   var Affjax_RequestBody = PS["Affjax.RequestBody"];
   var Control_Semigroupoid = PS["Control.Semigroupoid"];
@@ -31058,12 +32094,6 @@ var PS = {};
   var Slug = PS["Slug"];
   var Yzmall_Data_Commodity = PS["Yzmall.Data.Commodity"];
   var Yzmall_Data_Route = PS["Yzmall.Data.Route"];                 
-
-  // | This data type captures each endpoint our API supports. In a larger application this would be
-  // | tedious to maintain, and it's more common to generate endpoints from a Swagger or Open API
-  // | spec. For the time being, though, we'll take the same approach as we did for our routes and
-  // | create an encompassing sum type to represent all endpoints. With this type, requests to 
-  // | invalid endpoints (endpoints not captured in this type) will fail to compile.
   var MyAddresses = (function () {
       function MyAddresses() {
 
@@ -31071,38 +32101,6 @@ var PS = {};
       MyAddresses.value = new MyAddresses();
       return MyAddresses;
   })();
-
-  // | This data type captures each endpoint our API supports. In a larger application this would be
-  // | tedious to maintain, and it's more common to generate endpoints from a Swagger or Open API
-  // | spec. For the time being, though, we'll take the same approach as we did for our routes and
-  // | create an encompassing sum type to represent all endpoints. With this type, requests to 
-  // | invalid endpoints (endpoints not captured in this type) will fail to compile.
-  var MyBankCards = (function () {
-      function MyBankCards() {
-
-      };
-      MyBankCards.value = new MyBankCards();
-      return MyBankCards;
-  })();
-
-  // | This data type captures each endpoint our API supports. In a larger application this would be
-  // | tedious to maintain, and it's more common to generate endpoints from a Swagger or Open API
-  // | spec. For the time being, though, we'll take the same approach as we did for our routes and
-  // | create an encompassing sum type to represent all endpoints. With this type, requests to 
-  // | invalid endpoints (endpoints not captured in this type) will fail to compile.
-  var BankCard = (function () {
-      function BankCard() {
-
-      };
-      BankCard.value = new BankCard();
-      return BankCard;
-  })();
-
-  // | This data type captures each endpoint our API supports. In a larger application this would be
-  // | tedious to maintain, and it's more common to generate endpoints from a Swagger or Open API
-  // | spec. For the time being, though, we'll take the same approach as we did for our routes and
-  // | create an encompassing sum type to represent all endpoints. With this type, requests to 
-  // | invalid endpoints (endpoints not captured in this type) will fail to compile.
   var AddAddress = (function () {
       function AddAddress() {
 
@@ -31110,12 +32108,77 @@ var PS = {};
       AddAddress.value = new AddAddress();
       return AddAddress;
   })();
+  var DeleteAddress = (function () {
+      function DeleteAddress(value0) {
+          this.value0 = value0;
+      };
+      DeleteAddress.create = function (value0) {
+          return new DeleteAddress(value0);
+      };
+      return DeleteAddress;
+  })();
+  var GetAddress = (function () {
+      function GetAddress(value0) {
+          this.value0 = value0;
+      };
+      GetAddress.create = function (value0) {
+          return new GetAddress(value0);
+      };
+      return GetAddress;
+  })();
+  var Invitees = (function () {
+      function Invitees() {
 
-  // | This data type captures each endpoint our API supports. In a larger application this would be
-  // | tedious to maintain, and it's more common to generate endpoints from a Swagger or Open API
-  // | spec. For the time being, though, we'll take the same approach as we did for our routes and
-  // | create an encompassing sum type to represent all endpoints. With this type, requests to 
-  // | invalid endpoints (endpoints not captured in this type) will fail to compile.
+      };
+      Invitees.value = new Invitees();
+      return Invitees;
+  })();
+  var Logout = (function () {
+      function Logout() {
+
+      };
+      Logout.value = new Logout();
+      return Logout;
+  })();
+  var BindAlipay = (function () {
+      function BindAlipay() {
+
+      };
+      BindAlipay.value = new BindAlipay();
+      return BindAlipay;
+  })();
+  var MyBankCards = (function () {
+      function MyBankCards() {
+
+      };
+      MyBankCards.value = new MyBankCards();
+      return MyBankCards;
+  })();
+  var GetBankCard = (function () {
+      function GetBankCard(value0) {
+          this.value0 = value0;
+      };
+      GetBankCard.create = function (value0) {
+          return new GetBankCard(value0);
+      };
+      return GetBankCard;
+  })();
+  var AddBankCard = (function () {
+      function AddBankCard() {
+
+      };
+      AddBankCard.value = new AddBankCard();
+      return AddBankCard;
+  })();
+  var DeleteBankCard = (function () {
+      function DeleteBankCard(value0) {
+          this.value0 = value0;
+      };
+      DeleteBankCard.create = function (value0) {
+          return new DeleteBankCard(value0);
+      };
+      return DeleteBankCard;
+  })();
   var MyAccountInfo = (function () {
       function MyAccountInfo() {
 
@@ -31123,12 +32186,6 @@ var PS = {};
       MyAccountInfo.value = new MyAccountInfo();
       return MyAccountInfo;
   })();
-
-  // | This data type captures each endpoint our API supports. In a larger application this would be
-  // | tedious to maintain, and it's more common to generate endpoints from a Swagger or Open API
-  // | spec. For the time being, though, we'll take the same approach as we did for our routes and
-  // | create an encompassing sum type to represent all endpoints. With this type, requests to 
-  // | invalid endpoints (endpoints not captured in this type) will fail to compile.
   var VerifyIDCard = (function () {
       function VerifyIDCard() {
 
@@ -31136,12 +32193,6 @@ var PS = {};
       VerifyIDCard.value = new VerifyIDCard();
       return VerifyIDCard;
   })();
-
-  // | This data type captures each endpoint our API supports. In a larger application this would be
-  // | tedious to maintain, and it's more common to generate endpoints from a Swagger or Open API
-  // | spec. For the time being, though, we'll take the same approach as we did for our routes and
-  // | create an encompassing sum type to represent all endpoints. With this type, requests to 
-  // | invalid endpoints (endpoints not captured in this type) will fail to compile.
   var Login = (function () {
       function Login() {
 
@@ -31149,12 +32200,6 @@ var PS = {};
       Login.value = new Login();
       return Login;
   })();
-
-  // | This data type captures each endpoint our API supports. In a larger application this would be
-  // | tedious to maintain, and it's more common to generate endpoints from a Swagger or Open API
-  // | spec. For the time being, though, we'll take the same approach as we did for our routes and
-  // | create an encompassing sum type to represent all endpoints. With this type, requests to 
-  // | invalid endpoints (endpoints not captured in this type) will fail to compile.
   var CreateVcode = (function () {
       function CreateVcode() {
 
@@ -31162,12 +32207,6 @@ var PS = {};
       CreateVcode.value = new CreateVcode();
       return CreateVcode;
   })();
-
-  // | This data type captures each endpoint our API supports. In a larger application this would be
-  // | tedious to maintain, and it's more common to generate endpoints from a Swagger or Open API
-  // | spec. For the time being, though, we'll take the same approach as we did for our routes and
-  // | create an encompassing sum type to represent all endpoints. With this type, requests to 
-  // | invalid endpoints (endpoints not captured in this type) will fail to compile.
   var ResetPassword = (function () {
       function ResetPassword() {
 
@@ -31175,12 +32214,6 @@ var PS = {};
       ResetPassword.value = new ResetPassword();
       return ResetPassword;
   })();
-
-  // | This data type captures each endpoint our API supports. In a larger application this would be
-  // | tedious to maintain, and it's more common to generate endpoints from a Swagger or Open API
-  // | spec. For the time being, though, we'll take the same approach as we did for our routes and
-  // | create an encompassing sum type to represent all endpoints. With this type, requests to 
-  // | invalid endpoints (endpoints not captured in this type) will fail to compile.
   var CreateAccount = (function () {
       function CreateAccount() {
 
@@ -31188,12 +32221,13 @@ var PS = {};
       CreateAccount.value = new CreateAccount();
       return CreateAccount;
   })();
+  var SetName = (function () {
+      function SetName() {
 
-  // | This data type captures each endpoint our API supports. In a larger application this would be
-  // | tedious to maintain, and it's more common to generate endpoints from a Swagger or Open API
-  // | spec. For the time being, though, we'll take the same approach as we did for our routes and
-  // | create an encompassing sum type to represent all endpoints. With this type, requests to 
-  // | invalid endpoints (endpoints not captured in this type) will fail to compile.
+      };
+      SetName.value = new SetName();
+      return SetName;
+  })();
   var ViewCommodity = (function () {
       function ViewCommodity(value0) {
           this.value0 = value0;
@@ -31203,12 +32237,6 @@ var PS = {};
       };
       return ViewCommodity;
   })();
-
-  // | This data type captures each endpoint our API supports. In a larger application this would be
-  // | tedious to maintain, and it's more common to generate endpoints from a Swagger or Open API
-  // | spec. For the time being, though, we'll take the same approach as we did for our routes and
-  // | create an encompassing sum type to represent all endpoints. With this type, requests to 
-  // | invalid endpoints (endpoints not captured in this type) will fail to compile.
   var GetCommodity = (function () {
       function GetCommodity(value0) {
           this.value0 = value0;
@@ -31218,12 +32246,70 @@ var PS = {};
       };
       return GetCommodity;
   })();
+  var ViewOrder = (function () {
+      function ViewOrder() {
 
-  // | This data type captures each endpoint our API supports. In a larger application this would be
-  // | tedious to maintain, and it's more common to generate endpoints from a Swagger or Open API
-  // | spec. For the time being, though, we'll take the same approach as we did for our routes and
-  // | create an encompassing sum type to represent all endpoints. With this type, requests to 
-  // | invalid endpoints (endpoints not captured in this type) will fail to compile.
+      };
+      ViewOrder.value = new ViewOrder();
+      return ViewOrder;
+  })();
+  var PayForOrder = (function () {
+      function PayForOrder(value0) {
+          this.value0 = value0;
+      };
+      PayForOrder.create = function (value0) {
+          return new PayForOrder(value0);
+      };
+      return PayForOrder;
+  })();
+  var CreateOrderSpecial = (function () {
+      function CreateOrderSpecial(value0) {
+          this.value0 = value0;
+      };
+      CreateOrderSpecial.create = function (value0) {
+          return new CreateOrderSpecial(value0);
+      };
+      return CreateOrderSpecial;
+  })();
+  var PayForOrderSpecial = (function () {
+      function PayForOrderSpecial(value0) {
+          this.value0 = value0;
+      };
+      PayForOrderSpecial.create = function (value0) {
+          return new PayForOrderSpecial(value0);
+      };
+      return PayForOrderSpecial;
+  })();
+  var DeleteOrder = (function () {
+      function DeleteOrder(value0) {
+          this.value0 = value0;
+      };
+      DeleteOrder.create = function (value0) {
+          return new DeleteOrder(value0);
+      };
+      return DeleteOrder;
+  })();
+  var CreateACTSellCommission = (function () {
+      function CreateACTSellCommission() {
+
+      };
+      CreateACTSellCommission.value = new CreateACTSellCommission();
+      return CreateACTSellCommission;
+  })();
+  var CreateACTSellRebate = (function () {
+      function CreateACTSellRebate() {
+
+      };
+      CreateACTSellRebate.value = new CreateACTSellRebate();
+      return CreateACTSellRebate;
+  })();
+  var CreateACTSellRush = (function () {
+      function CreateACTSellRush() {
+
+      };
+      CreateACTSellRush.value = new CreateACTSellRush();
+      return CreateACTSellRush;
+  })();
   var CreateOrder = (function () {
       function CreateOrder(value0) {
           this.value0 = value0;
@@ -31233,130 +32319,247 @@ var PS = {};
       };
       return CreateOrder;
   })();
+  var ACTSharedRecord = (function () {
+      function ACTSharedRecord() {
 
-  // | This data type captures each endpoint our API supports. In a larger application this would be
-  // | tedious to maintain, and it's more common to generate endpoints from a Swagger or Open API
-  // | spec. For the time being, though, we'll take the same approach as we did for our routes and
-  // | create an encompassing sum type to represent all endpoints. With this type, requests to 
-  // | invalid endpoints (endpoints not captured in this type) will fail to compile.
-  var CreateSpecialOrder = (function () {
-      function CreateSpecialOrder(value0) {
-          this.value0 = value0;
       };
-      CreateSpecialOrder.create = function (value0) {
-          return new CreateSpecialOrder(value0);
+      ACTSharedRecord.value = new ACTSharedRecord();
+      return ACTSharedRecord;
+  })();
+  var MyACTSells = (function () {
+      function MyACTSells() {
+
       };
-      return CreateSpecialOrder;
+      MyACTSells.value = new MyACTSells();
+      return MyACTSells;
+  })();
+  var ViewCommissions = (function () {
+      function ViewCommissions() {
+
+      };
+      ViewCommissions.value = new ViewCommissions();
+      return ViewCommissions;
   })();
   var genericEndpoint = new Data_Generic_Rep.Generic(function (x) {
       if (x instanceof MyAddresses) {
           return new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value);
       };
-      if (x instanceof MyBankCards) {
+      if (x instanceof AddAddress) {
           return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value));
       };
-      if (x instanceof BankCard) {
-          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value)));
+      if (x instanceof DeleteAddress) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0)));
       };
-      if (x instanceof AddAddress) {
-          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value))));
+      if (x instanceof GetAddress) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0))));
       };
-      if (x instanceof MyAccountInfo) {
+      if (x instanceof Invitees) {
           return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value)))));
       };
-      if (x instanceof VerifyIDCard) {
+      if (x instanceof Logout) {
           return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value))))));
       };
-      if (x instanceof Login) {
+      if (x instanceof BindAlipay) {
           return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value)))))));
       };
-      if (x instanceof CreateVcode) {
+      if (x instanceof MyBankCards) {
           return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value))))))));
       };
-      if (x instanceof ResetPassword) {
-          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value)))))))));
+      if (x instanceof GetBankCard) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0)))))))));
       };
-      if (x instanceof CreateAccount) {
+      if (x instanceof AddBankCard) {
           return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value))))))))));
       };
-      if (x instanceof ViewCommodity) {
+      if (x instanceof DeleteBankCard) {
           return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0)))))))))));
       };
+      if (x instanceof MyAccountInfo) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value))))))))))));
+      };
+      if (x instanceof VerifyIDCard) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value)))))))))))));
+      };
+      if (x instanceof Login) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value))))))))))))));
+      };
+      if (x instanceof CreateVcode) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value)))))))))))))));
+      };
+      if (x instanceof ResetPassword) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value))))))))))))))));
+      };
+      if (x instanceof CreateAccount) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value)))))))))))))))));
+      };
+      if (x instanceof SetName) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value))))))))))))))))));
+      };
+      if (x instanceof ViewCommodity) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0)))))))))))))))))));
+      };
       if (x instanceof GetCommodity) {
-          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0))))))))))));
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0))))))))))))))))))));
+      };
+      if (x instanceof ViewOrder) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value)))))))))))))))))))));
+      };
+      if (x instanceof PayForOrder) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0))))))))))))))))))))));
+      };
+      if (x instanceof CreateOrderSpecial) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0)))))))))))))))))))))));
+      };
+      if (x instanceof PayForOrderSpecial) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0))))))))))))))))))))))));
+      };
+      if (x instanceof DeleteOrder) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0)))))))))))))))))))))))));
+      };
+      if (x instanceof CreateACTSellCommission) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value))))))))))))))))))))))))));
+      };
+      if (x instanceof CreateACTSellRebate) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value)))))))))))))))))))))))))));
+      };
+      if (x instanceof CreateACTSellRush) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value))))))))))))))))))))))))))));
       };
       if (x instanceof CreateOrder) {
-          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0)))))))))))));
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(x.value0)))))))))))))))))))))))))))));
       };
-      if (x instanceof CreateSpecialOrder) {
-          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(x.value0)))))))))))));
+      if (x instanceof ACTSharedRecord) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value))))))))))))))))))))))))))))));
       };
-      throw new Error("Failed pattern match at Yzmall.Api.Endpoint line 72, column 8 - line 72, column 54: " + [ x.constructor.name ]);
+      if (x instanceof MyACTSells) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inl(Data_Generic_Rep.NoArguments.value)))))))))))))))))))))))))))))));
+      };
+      if (x instanceof ViewCommissions) {
+          return new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(new Data_Generic_Rep.Inr(Data_Generic_Rep.NoArguments.value)))))))))))))))))))))))))))))));
+      };
+      throw new Error("Failed pattern match at Yzmall.Api.Endpoint line 96, column 8 - line 96, column 54: " + [ x.constructor.name ]);
   }, function (x) {
       if (x instanceof Data_Generic_Rep.Inl) {
           return MyAddresses.value;
       };
       if (x instanceof Data_Generic_Rep.Inr && x.value0 instanceof Data_Generic_Rep.Inl) {
-          return MyBankCards.value;
-      };
-      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0 instanceof Data_Generic_Rep.Inl)) {
-          return BankCard.value;
-      };
-      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0 instanceof Data_Generic_Rep.Inl))) {
           return AddAddress.value;
       };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0 instanceof Data_Generic_Rep.Inl)) {
+          return new DeleteAddress(x.value0.value0.value0);
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0 instanceof Data_Generic_Rep.Inl))) {
+          return new GetAddress(x.value0.value0.value0.value0);
+      };
       if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))) {
-          return MyAccountInfo.value;
+          return Invitees.value;
       };
       if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))) {
-          return VerifyIDCard.value;
+          return Logout.value;
       };
       if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))))) {
-          return Login.value;
+          return BindAlipay.value;
       };
       if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))))) {
-          return CreateVcode.value;
+          return MyBankCards.value;
       };
       if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))))))) {
-          return ResetPassword.value;
+          return new GetBankCard(x.value0.value0.value0.value0.value0.value0.value0.value0.value0);
       };
       if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))))))) {
-          return CreateAccount.value;
+          return AddBankCard.value;
       };
       if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))))))))) {
-          return new ViewCommodity(x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0);
+          return new DeleteBankCard(x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0);
       };
       if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))))))))) {
-          return new GetCommodity(x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0);
+          return MyAccountInfo.value;
       };
       if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))))))))))) {
-          return new CreateOrder(x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0);
+          return VerifyIDCard.value;
       };
-      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr)))))))))))) {
-          return new CreateSpecialOrder(x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0);
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))))))))))) {
+          return Login.value;
       };
-      throw new Error("Failed pattern match at Yzmall.Api.Endpoint line 72, column 8 - line 72, column 54: " + [ x.constructor.name ]);
-  });                
-
-  // Our codec will cause a compile-time error if we fail to handle any of our 
-  // route cases.
-  // | We need to be able to write our `Endpoint` type to a valid path in order to make requests. We
-  // | can use `routing-duplex` the same way we did with our `Route` type to provide both a printer 
-  // | (write to `String`) and a parser (parse from `String`) that stays in sync with our `Endpoint`
-  // | type automatically.
-  // | 
-  // | For a full treatment of how this function produces both a parser and printer guaranteed to
-  // | produce valid paths, see the `routing-duplex` tutorial:
-  // | https://github.com/natefaubion/purescript-routing-duplex/tree/v0.2.0
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))))))))))))) {
+          return CreateVcode.value;
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))))))))))))) {
+          return ResetPassword.value;
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))))))))))))))) {
+          return CreateAccount.value;
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))))))))))))))) {
+          return SetName.value;
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))))))))))))))))) {
+          return new ViewCommodity(x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0);
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))))))))))))))))) {
+          return new GetCommodity(x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0);
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))))))))))))))))))) {
+          return ViewOrder.value;
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))))))))))))))))))) {
+          return new PayForOrder(x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0);
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))))))))))))))))))))) {
+          return new CreateOrderSpecial(x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0);
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))))))))))))))))))))) {
+          return new PayForOrderSpecial(x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0);
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))))))))))))))))))))))) {
+          return new DeleteOrder(x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0);
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))))))))))))))))))))))) {
+          return CreateACTSellCommission.value;
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))))))))))))))))))))))))) {
+          return CreateACTSellRebate.value;
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))))))))))))))))))))))))) {
+          return CreateACTSellRush.value;
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))))))))))))))))))))))))))) {
+          return new CreateOrder(x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0);
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl))))))))))))))))))))))))))))) {
+          return ACTSharedRecord.value;
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inl)))))))))))))))))))))))))))))) {
+          return MyACTSells.value;
+      };
+      if (x instanceof Data_Generic_Rep.Inr && (x.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && (x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr && x.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0.value0 instanceof Data_Generic_Rep.Inr)))))))))))))))))))))))))))))) {
+          return ViewCommissions.value;
+      };
+      throw new Error("Failed pattern match at Yzmall.Api.Endpoint line 96, column 8 - line 96, column 54: " + [ x.constructor.name ]);
+  });                                  
   var endpointCodec = Routing_Duplex.root(Routing_Duplex_Generic.sum(genericEndpoint)(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
       return "MyAddresses";
   }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
-      return "MyBankCards";
-  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
-      return "BankCard";
-  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
       return "AddAddress";
   }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "DeleteAddress";
+  }))()(Routing_Duplex_Generic.gRouteArgument))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "GetAddress";
+  }))()(Routing_Duplex_Generic.gRouteArgument))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "Invitees";
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "Logout";
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "BindAlipay";
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "MyBankCards";
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "GetBankCard";
+  }))()(Routing_Duplex_Generic.gRouteArgument))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "AddBankCard";
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "DeleteBankCard";
+  }))()(Routing_Duplex_Generic.gRouteArgument))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
       return "MyAccountInfo";
   }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
       return "VerifyIDCard";
@@ -31369,26 +32572,50 @@ var PS = {};
   }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
       return "CreateAccount";
   }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "SetName";
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
       return "ViewCommodity";
   }))()(Routing_Duplex_Generic.gRouteArgument))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
       return "GetCommodity";
   }))()(Routing_Duplex_Generic.gRouteArgument))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "ViewOrder";
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "PayForOrder";
+  }))()(Routing_Duplex_Generic.gRouteArgument))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "CreateOrderSpecial";
+  }))()(Routing_Duplex_Generic.gRouteArgument))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "PayForOrderSpecial";
+  }))()(Routing_Duplex_Generic.gRouteArgument))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "DeleteOrder";
+  }))()(Routing_Duplex_Generic.gRouteArgument))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "CreateACTSellCommission";
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "CreateACTSellRebate";
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "CreateACTSellRush";
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
       return "CreateOrder";
-  }))()(Routing_Duplex_Generic.gRouteArgument))(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
-      return "CreateSpecialOrder";
-  }))()(Routing_Duplex_Generic.gRouteArgument)))))))))))))))({
-      MyAddresses: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("address")(Routing_Duplex_Generic.noArgs)),
-      MyBankCards: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("bankCard")(Routing_Duplex_Generic.noArgs)),
-      BankCard: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("bankCard")(Routing_Duplex_Generic.noArgs)),
-      AddAddress: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("acount")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("address")(Routing_Duplex_Generic.noArgs)),
+  }))()(Routing_Duplex_Generic.gRouteArgument))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "ACTSharedRecord";
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteSum(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "MyACTSells";
+  }))()(Routing_Duplex_Generic.gRouteNoArguments))(Routing_Duplex_Generic.gRouteConstructor(new Data_Symbol.IsSymbol(function () {
+      return "ViewCommissions";
+  }))()(Routing_Duplex_Generic.gRouteNoArguments)))))))))))))))))))))))))))))))))({
+      MyAddresses: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("address")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("")(Routing_Duplex_Generic.noArgs))),
+      AddAddress: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("address")(Routing_Duplex_Generic.noArgs)),
+      DeleteAddress: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteArgument))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteArgument))("address")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepRouteString(Routing_Duplex_Generic.gRouteAll))(Yzmall_Data_Route.slug(Routing_Duplex.segment))("delete"))),
+      GetAddress: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteArgument))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteAll))("address")(Yzmall_Data_Route.slug(Routing_Duplex.segment))),
       MyAccountInfo: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("mine")(Routing_Duplex_Generic.noArgs)),
       VerifyIDCard: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("mine")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("setName")(Routing_Duplex_Generic.noArgs))),
       Login: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("public")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("login")(Routing_Duplex_Generic.noArgs))),
-      CreateOrder: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteArgument))("commodity")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepRouteString(Routing_Duplex_Generic.gRouteAll))(Yzmall_Data_Route.slug(Routing_Duplex.segment))("createOrder")),
-      CreateSpecialOrder: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteArgument))("commodity")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepRouteString(Routing_Duplex_Generic.gRouteAll))(Yzmall_Data_Route.slug(Routing_Duplex.segment))("createOrderSpecial")),
       CreateVcode: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("public")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("createVcode")(Routing_Duplex_Generic.noArgs))),
       ResetPassword: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("public")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("resetPassword")(Routing_Duplex_Generic.noArgs))),
       CreateAccount: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("public")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("createAccount")(Routing_Duplex_Generic.noArgs))),
+      SetName: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("mine")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("setName")(Routing_Duplex_Generic.noArgs))),
+      Invitees: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("invitees")(Routing_Duplex_Generic.noArgs)),
+      Logout: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("logout")(Routing_Duplex_Generic.noArgs)),
+      BindAlipay: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("mine")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("setAlipay")(Routing_Duplex_Generic.noArgs))),
       ViewCommodity: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteArgument))("public")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteAll))("commodity")(Routing_Duplex_Generic_Syntax.gparams(Routing_Duplex_Generic_Syntax.gparamsString(Routing_Duplex.routeDuplexParams()(Routing_Duplex.buildParamsCons(new Data_Symbol.IsSymbol(function () {
           return "category";
       }))()()()()(Routing_Duplex.buildParamsCons(new Data_Symbol.IsSymbol(function () {
@@ -31397,128 +32624,131 @@ var PS = {};
           return "size";
       }))()()()()(Routing_Duplex.buildParamsNil))))))("")({
           category: Routing_Duplex.string,
-          page: function ($115) {
-              return Routing_Duplex.optional(Routing_Duplex["int"]($115));
+          page: function ($552) {
+              return Routing_Duplex.optional(Routing_Duplex["int"]($552));
           },
-          size: function ($116) {
-              return Routing_Duplex.optional(Routing_Duplex["int"]($116));
+          size: function ($553) {
+              return Routing_Duplex.optional(Routing_Duplex["int"]($553));
           }
       }))),
-      GetCommodity: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteArgument))("public")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteAll))("commodity")(Yzmall_Data_Route.slug(Routing_Duplex.segment)))
+      GetCommodity: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteArgument))("public")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteAll))("commodity")(Yzmall_Data_Route.slug(Routing_Duplex.segment))),
+      ViewOrder: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("commodity")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("order")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("")(Routing_Duplex_Generic.noArgs))),
+      PayForOrder: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteArgument))("commodity")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteArgument))("order")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepRouteString(Routing_Duplex_Generic.gRouteAll))(Yzmall_Data_Route.slug(Routing_Duplex.segment))("pay"))),
+      CreateOrderSpecial: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteArgument))("commodity")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepRouteString(Routing_Duplex_Generic.gRouteAll))(Yzmall_Data_Route.slug(Routing_Duplex.segment))("createOrderSpecial")),
+      PayForOrderSpecial: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteArgument))("commodity")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteArgument))("order")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepRouteString(Routing_Duplex_Generic.gRouteAll))(Yzmall_Data_Route.slug(Routing_Duplex.segment))("paySpecial"))),
+      DeleteOrder: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteArgument))("commodity")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteArgument))("order")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepRouteString(Routing_Duplex_Generic.gRouteAll))(Yzmall_Data_Route.slug(Routing_Duplex.segment))("delete"))),
+      CreateACTSellCommission: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("commodity")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("createMYTSellCommission")(Routing_Duplex_Generic.noArgs)),
+      CreateACTSellRebate: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("commodity")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("createMYTSellRebate")(Routing_Duplex_Generic.noArgs)),
+      CreateACTSellRush: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("commodity")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("createMYTSellRush")(Routing_Duplex_Generic.noArgs)),
+      CreateOrder: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteArgument))("commodity")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepRouteString(Routing_Duplex_Generic.gRouteAll))(Yzmall_Data_Route.slug(Routing_Duplex.segment))("createOrder")),
+      ACTSharedRecord: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("commodity")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("mytSharedRecord")(Routing_Duplex_Generic.noArgs)),
+      MyACTSells: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("commodity")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("mytSell")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("")(Routing_Duplex_Generic.noArgs))),
+      ViewCommissions: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("commodity")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("commission")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("")(Routing_Duplex_Generic.noArgs))),
+      MyBankCards: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("bankCard")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("")(Routing_Duplex_Generic.noArgs))),
+      AddBankCard: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteNoArguments))("bankCard")(Routing_Duplex_Generic.noArgs)),
+      DeleteBankCard: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteArgument))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteArgument))("bankCard")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepRouteString(Routing_Duplex_Generic.gRouteAll))(Yzmall_Data_Route.slug(Routing_Duplex.segment))("delete"))),
+      GetBankCard: Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteArgument))("account")(Routing_Duplex_Generic_Syntax.gsep(Routing_Duplex_Generic_Syntax.gsepStringRoute(Routing_Duplex_Generic.gRouteAll))("bankCard")(Yzmall_Data_Route.slug(Routing_Duplex.segment)))
   }));
   exports["MyAddresses"] = MyAddresses;
-  exports["MyBankCards"] = MyBankCards;
-  exports["BankCard"] = BankCard;
   exports["AddAddress"] = AddAddress;
+  exports["DeleteAddress"] = DeleteAddress;
+  exports["GetAddress"] = GetAddress;
+  exports["Invitees"] = Invitees;
+  exports["Logout"] = Logout;
+  exports["BindAlipay"] = BindAlipay;
+  exports["MyBankCards"] = MyBankCards;
+  exports["GetBankCard"] = GetBankCard;
+  exports["AddBankCard"] = AddBankCard;
+  exports["DeleteBankCard"] = DeleteBankCard;
   exports["MyAccountInfo"] = MyAccountInfo;
   exports["VerifyIDCard"] = VerifyIDCard;
   exports["Login"] = Login;
   exports["CreateVcode"] = CreateVcode;
   exports["ResetPassword"] = ResetPassword;
   exports["CreateAccount"] = CreateAccount;
+  exports["SetName"] = SetName;
   exports["ViewCommodity"] = ViewCommodity;
   exports["GetCommodity"] = GetCommodity;
+  exports["ViewOrder"] = ViewOrder;
+  exports["PayForOrder"] = PayForOrder;
+  exports["CreateOrderSpecial"] = CreateOrderSpecial;
+  exports["PayForOrderSpecial"] = PayForOrderSpecial;
+  exports["DeleteOrder"] = DeleteOrder;
+  exports["CreateACTSellCommission"] = CreateACTSellCommission;
+  exports["CreateACTSellRebate"] = CreateACTSellRebate;
+  exports["CreateACTSellRush"] = CreateACTSellRush;
   exports["CreateOrder"] = CreateOrder;
-  exports["CreateSpecialOrder"] = CreateSpecialOrder;
+  exports["ACTSharedRecord"] = ACTSharedRecord;
+  exports["MyACTSells"] = MyACTSells;
+  exports["ViewCommissions"] = ViewCommissions;
   exports["endpointCodec"] = endpointCodec;
   exports["genericEndpoint"] = genericEndpoint;
 })(PS["Yzmall.Api.Endpoint"] = PS["Yzmall.Api.Endpoint"] || {});
 (function(exports) {
-    "use strict";
-  var Data_Argonaut_Decode = PS["Data.Argonaut.Decode"];
-  var Data_Argonaut_Decode_Class = PS["Data.Argonaut.Decode.Class"];
-  var Data_Argonaut_Encode = PS["Data.Argonaut.Encode"];
-  var Data_Argonaut_Encode_Class = PS["Data.Argonaut.Encode.Class"];
-  var Data_Eq = PS["Data.Eq"];
-  var Data_Generic_Rep = PS["Data.Generic.Rep"];
-  var Data_Generic_Rep_Show = PS["Data.Generic.Rep.Show"];
-  var Data_Newtype = PS["Data.Newtype"];
-  var Data_Ord = PS["Data.Ord"];
-  var Data_Show = PS["Data.Show"];
-  var Data_Symbol = PS["Data.Symbol"];
-  var Prelude = PS["Prelude"];                 
-
-  // | This type exists purely as an identifier to distinguish it from a normal `String`, so we'll
-  // | create a simple newtype which can be freely wrapped or unwrapped.
-  var Phone = function (x) {
-      return x;
-  };        
-  var genericPhone = new Data_Generic_Rep.Generic(function (x) {
-      return x;
-  }, function (x) {
-      return x;
-  });
-  var showPhone = new Data_Show.Show(Data_Generic_Rep_Show.genericShow(genericPhone)(Data_Generic_Rep_Show.genericShowConstructor(Data_Generic_Rep_Show.genericShowArgsArgument(Data_Show.showString))(new Data_Symbol.IsSymbol(function () {
-      return "Phone";
-  }))));
-  var encodeJsonPhone = Data_Argonaut_Encode_Class.encodeJsonJString;
-  exports["Phone"] = Phone;
-  exports["genericPhone"] = genericPhone;
-  exports["encodeJsonPhone"] = encodeJsonPhone;
-  exports["showPhone"] = showPhone;
-})(PS["Yzmall.Data.Phone"] = PS["Yzmall.Data.Phone"] || {});
-(function(exports) {
   // Generated by purs version 0.12.1
-  "use strict";
-  var specialIconM = "http://xiangqingkeji.com/images/btn_footer03m.png";
-  var specialIcon = "http://xiangqingkeji.com/images/btn_footer03.png";
-  var regularIconM = "http://xiangqingkeji.com/images/btn_footer02m.png";
+  "use strict";                                                
+  var regularIconM = "./image/icon_menu_zjsp.png";
   var regularIcon = "http://xiangqingkeji.com/images/btn_footer02.png";
-  var recordIconM = "http://xiangqingkeji.com/images/btn_footer04m.png";
+  var recordIconM = "./image/icon_menu_jyzx.png";
   var recordIcon = "http://xiangqingkeji.com/images/btn_footer04.png";
-  var logoTitle = "./image/logo_title.png";  
-  var logo = "http://xiangqingkeji.com/img/logo3.png";
+  var logoTitle = "./image/logo_title.png";
+  var logoNavbar = "./image/logo_navbar.png";
+  var logo = "./image/logo3.png";
   var imgUrl = "http://xiangqingkeji.com/uploads/banner/201901305c519aaf3e00c1893.jpg";
-  var iconWdtg = "./image/icon_wdtg.png";
-  var iconWdfx = "./image/icon_wdfx.png";
-  var iconWdds = "./image/icon_wdds.png";
+  var icon_wallet = "./image/icons/icon_wallet.png";
+  var icon_share = "./image/icons/icon_share.png";  
+  var icon_qrcode = "./image/icons/icon_qrcode.png";
+  var icon_money = "./image/icons/icon_money.png";
+  var icon_back = "./image/icons/icon_back.png";
+  var icon_address = "./image/icons/icon_address.png";
   var cardContent = "\u94f6\u6d32VIP\u4f1a\u5458\u865a\u62df\u5361\uff0c\u8d2d\u4e70\u4e0d\u9001\u91d1\u5e01\uff0c\u8d2d\u4e70\u6b64\u865a\u62df\u5546\u54c1\u53ef\u76f4\u63a5\u7ed1\u5b9a\u6d88\u8d39\u5361\uff0c\u907f\u514d\u60a8\u5728\u62a2\u8d2d\u9ad8\u5cf0\u65f6\u95f4\u7531\u4e8e\u7ed1\u5361\u64cd\u4f5c\u6d6a\u8d39\u5b9d\u8d35\u65f6\u95f4.";
-  var bgTuiGuang = "./image/bg_tuiguang.png";
   var bgInfoTitle = "./image/bg_info_title.png";
   var bgHeader = "./image/bg_header.png";
-  var bgFooter = "./image/bg_footer.png";
   var bgCommodity = "./image/bg_commodity.png";
-  var bgBanner = "./image/bg_banner.png";
-  var banner2 = "http://xiangqingkeji.com/uploads/banner/201901305c519aaf3e00c1893.jpg";
-  var banner1 = "http://xiangqingkeji.com/uploads/banner/201901305c519ab9684c69999.jpg";
-  var accountIconM = "http://xiangqingkeji.com/images/btn_footer05m.png";
+  var bgBanner = "./image/bg_banner.png";                                               
+  var alipayNote = "\u652f\u4ed8\u5b9d\u6536\u6b3e\u8d26\u6237\u53ea\u80fd\u586b\u5199\u4e00\u6b21\uff0c\u4e0d\u53ef\u4fee\u6539\uff0c\u8bf7\u52a1\u5fc5\u786e\u8ba4\u60a8\u586b\u5199\u7684\u662f\u81ea\u5df1\u7684\u5b9e\u540d\u8d26\u53f7\uff01\u53ef\u4ee5\u6b63\u5e38\u6536\u6b3e\u7684\uff0c\u5982\u679c\u7531\u4e8e\u8f93\u5165\u9519\u8bef\uff0c\u6216\u8005\u4f7f\u7528\u4e86\u975e\u672c\u4eba\u8d26\u53f7\u5bfc\u81f4\u65e0\u6cd5\u5230\u8d26\uff0c\u672c\u5e73\u53f0\u6982\u4e0d\u8d1f\u8d23\u3002";
+  var accountIconM = "./image/icon_menu_grzx.png";
   var accountIcon = "http://xiangqingkeji.com/images/btn_footer05.png";
   exports["cardContent"] = cardContent;
+  exports["alipayNote"] = alipayNote;
   exports["imgUrl"] = imgUrl;
-  exports["banner1"] = banner1;
-  exports["banner2"] = banner2;
   exports["logo"] = logo;
   exports["regularIcon"] = regularIcon;
   exports["regularIconM"] = regularIconM;
-  exports["specialIcon"] = specialIcon;
-  exports["specialIconM"] = specialIconM;
   exports["recordIcon"] = recordIcon;
   exports["recordIconM"] = recordIconM;
   exports["accountIcon"] = accountIcon;
   exports["accountIconM"] = accountIconM;
   exports["bgBanner"] = bgBanner;
   exports["bgCommodity"] = bgCommodity;
-  exports["bgFooter"] = bgFooter;
   exports["bgHeader"] = bgHeader;
   exports["bgInfoTitle"] = bgInfoTitle;
-  exports["bgTuiGuang"] = bgTuiGuang;
-  exports["iconWdds"] = iconWdds;
-  exports["iconWdfx"] = iconWdfx;
-  exports["iconWdtg"] = iconWdtg;
   exports["logoTitle"] = logoTitle;
+  exports["logoNavbar"] = logoNavbar;
+  exports["icon_address"] = icon_address;
+  exports["icon_money"] = icon_money;
+  exports["icon_wallet"] = icon_wallet;
+  exports["icon_back"] = icon_back;
+  exports["icon_qrcode"] = icon_qrcode;
+  exports["icon_share"] = icon_share;
 })(PS["String"] = PS["String"] || {});
 (function(exports) {
-    "use strict";
+  // Generated by purs version 0.12.1
+  "use strict";
   var Conduit_Component_Utils = PS["Conduit.Component.Utils"];
+  var Control_Semigroupoid = PS["Control.Semigroupoid"];
   var Data_Array = PS["Data.Array"];
   var Data_Eq = PS["Data.Eq"];
   var Data_EuclideanRing = PS["Data.EuclideanRing"];
   var Data_Function = PS["Data.Function"];
   var Data_Functor = PS["Data.Functor"];
   var Data_Maybe = PS["Data.Maybe"];
+  var Data_Ord = PS["Data.Ord"];
   var Data_Ring = PS["Data.Ring"];
   var Data_Semigroup = PS["Data.Semigroup"];
   var Data_Show = PS["Data.Show"];
+  var Data_String = PS["Data.String"];
+  var Data_String_CodePoints = PS["Data.String.CodePoints"];
   var Data_Tuple = PS["Data.Tuple"];
   var Halogen = PS["Halogen"];
   var Halogen_HTML = PS["Halogen.HTML"];
@@ -31533,18 +32763,16 @@ var PS = {};
   var $$String = PS["String"];
   var Web_HTML_Event_EventTypes = PS["Web.HTML.Event.EventTypes"];
   var Yzmall_Data_Commodity = PS["Yzmall.Data.Commodity"];
-  var Yzmall_Data_Route = PS["Yzmall.Data.Route"];                                            
+  var Yzmall_Data_Route = PS["Yzmall.Data.Route"];                 
+  var unsafeSlug = function (str) {
+      return Data_Maybe.fromJust()(Slug.generate(str));
+  };                                                                                          
   var renderSlider = function (src) {
-      return function (n) {
-          return Halogen_HTML_Elements.div([ Halogen_HTML_Properties.class_(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.carouselItem)((function () {
-              var $4 = n === 0;
-              if ($4) {
-                  return Halogen_Themes_Bootstrap4.active;
-              };
-              return "";
-          })())) ])([ Halogen_HTML_Elements.img([ Halogen_HTML_Properties.class_(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Halogen_Themes_Bootstrap4.w100)), Halogen_HTML_Properties.src(src), Halogen_HTML_Properties.alt("slider" + Data_Show.show(Data_Show.showInt)(n)) ]) ]);
+      return function (url) {
+          return Halogen_HTML_Elements.a([ Halogen_HTML_Properties.class_(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.carouselItem)(Halogen_Themes_Bootstrap4.active)), Halogen_HTML_Properties.href(url) ])([ Halogen_HTML_Elements.img([ Halogen_HTML_Properties.class_(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Halogen_Themes_Bootstrap4.w100)), Halogen_HTML_Properties.src(src), Halogen_HTML_Properties.alt("slider-1") ]) ]);
       };
   };
+  var renderFooter = Halogen_HTML_Core.text("");
   var foreach_ = function (arr) {
       return function (f) {
           var temp = Data_Array.zip(Data_Array.range(0)(99))(arr);
@@ -31552,6 +32780,14 @@ var PS = {};
               return f(v.value1)(v.value0);
           })(temp);
       };
+  };
+  var encodePhone = function (phone) {
+      var func = function (f) {
+          return function ($16) {
+              return Data_String_CodePoints.fromCodePointArray(f(Data_String_CodePoints.toCodePointArray($16)));
+          };
+      };
+      return func(Data_Array.take(3))(phone) + ("****" + func(Data_Array.takeEnd(4))(phone));
   };
   var cls = Halogen_HTML_Properties.class_;
   var attr_ = function (key) {
@@ -31563,78 +32799,55 @@ var PS = {};
       return function (title) {
           return function (footer) {
               return function (body) {
-                  return Halogen_HTML_Elements.div([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.modal)(Halogen_Themes_Bootstrap4.fade)), Halogen_HTML_Properties.tabIndex(-1 | 0), attr_("role")("dialog"), attr_("id")(id) ])([ Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.modalDialog), attr_("role")("document") ])([ Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.modalContent) ])([ Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.modalContent) ])([ Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.modalHeader) ])([ Halogen_HTML_Elements.h5([ cls(Halogen_Themes_Bootstrap4.modalTitle) ])([ Halogen_HTML_Core.text(title) ]), Halogen_HTML_Elements.button([ cls(Halogen_Themes_Bootstrap4.close), attr_("type")("button"), attr_("data-dismiss")("modal"), attr_("aria-label")("Close") ])([ Halogen_HTML_Elements.span([ attr_("aria-hidden")("true") ])([ Halogen_HTML_Core.text("\xd7") ]) ]) ]), Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.modalBody) ])(body), Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.modalFooter) ])(footer) ]) ]) ]) ]);
+                  return function (hideClose) {
+                      return Halogen_HTML_Elements.div([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.modal)(Halogen_Themes_Bootstrap4.fade)), Halogen_HTML_Properties.tabIndex(-1 | 0), attr_("role")("dialog"), attr_("id")(id) ])([ Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.modalDialog), attr_("role")("document") ])([ Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.modalContent) ])([ Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.modalContent) ])([ Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.modalHeader) ])([ Halogen_HTML_Elements.h5([ cls(Halogen_Themes_Bootstrap4.modalTitle) ])([ Halogen_HTML_Core.text(title) ]), (function () {
+                          if (hideClose) {
+                              return Halogen_HTML_Elements.button([ cls(Halogen_Themes_Bootstrap4.close), attr_("type")("button"), attr_("data-dismiss")("modal"), attr_("aria-label")("Close") ])([ Halogen_HTML_Elements.span([ attr_("aria-hidden")("true") ])([ Halogen_HTML_Core.text("\xd7") ]) ]);
+                          };
+                          return Halogen_HTML_Core.text("");
+                      })() ]), Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.modalBody) ])(body), Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.modalFooter) ])(footer) ]) ]) ]) ]);
+                  };
               };
           };
       };
   };
-
-  // |   <ol class="carousel-indicators">
-  //  <li data-target="#carouselExampleIndicators" data-slide-to="0" class="active"></li>
-  //  <li data-target="#carouselExampleIndicators" data-slide-to="1"></li>
-  //  <li data-target="#carouselExampleIndicators" data-slide-to="2"></li>
-  // </ol>
   var renderli = function (src) {
       return function (n) {
           return Halogen_HTML_Elements.li([ attr_("data-target")("#" + src), attr_("data-slide-to")(Data_Show.show(Data_Show.showInt)(n)), Halogen_HTML_Properties.class_((function () {
-              var $11 = n === 0;
-              if ($11) {
+              var $12 = n === 0;
+              if ($12) {
                   return Halogen_Themes_Bootstrap4.active;
               };
               return "";
           })()) ])([  ]);
       };
   };
-
-  // | Banner
-  var renderBanner = function (state) {
-      return Halogen_HTML_Elements.a([ Halogen_HTML_Properties.class_(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.myAuto)) ])([ Halogen_HTML_Elements.div([ Halogen_HTML_Properties.class_(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.carousel)("slide")), attr_("data-ride")("carousel"), attr_("id")("carouselControls") ])([ Halogen_HTML_Elements.ol([ Halogen_HTML_Properties.class_(Halogen_Themes_Bootstrap4.carouselIndicators) ])(foreach_(Data_Functor.map(Data_Functor.functorArray)(Data_Function["const"]("carouselControls"))(state))(renderli)), Halogen_HTML_Elements.div([ Halogen_HTML_Properties.class_(Halogen_Themes_Bootstrap4.carouselInner) ])(foreach_(state)(renderSlider)), Halogen_HTML_Elements.a([ Halogen_HTML_Properties.class_(Halogen_Themes_Bootstrap4.carouselControlPrev), Halogen_HTML_Properties.href("#carouselControls"), attr_("role")("button"), attr_("data-slide")("prev") ])([ Halogen_HTML_Elements.span([ Halogen_HTML_Properties.class_(Halogen_Themes_Bootstrap4.carouselControlPrevIcon), attr_("aria-hidder")("true") ])([  ]), Halogen_HTML_Elements.span([ Halogen_HTML_Properties.class_(Halogen_Themes_Bootstrap4.srOnly) ])([ Halogen_HTML_Core.text("Previous") ]) ]), Halogen_HTML_Elements.a([ Halogen_HTML_Properties.class_(Halogen_Themes_Bootstrap4.carouselControlNext), Halogen_HTML_Properties.href("#carouselControls"), attr_("role")("button"), attr_("data-slide")("next") ])([ Halogen_HTML_Elements.span([ Halogen_HTML_Properties.class_(Halogen_Themes_Bootstrap4.carouselControlNextIcon), attr_("aria-hidder")("true") ])([  ]), Halogen_HTML_Elements.span([ Halogen_HTML_Properties.class_(Halogen_Themes_Bootstrap4.srOnly) ])([ Halogen_HTML_Core.text("Next") ]) ]) ]) ]);
-  };
+  var renderBanner = Halogen_HTML_Elements.a([ Halogen_HTML_Properties.class_(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.myAuto)) ])([ Halogen_HTML_Elements.div([ Halogen_HTML_Properties.class_(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.carousel)("slide")), attr_("data-ride")("carousel"), attr_("id")("carouselControls") ])([ Halogen_HTML_Elements.ol([ Halogen_HTML_Properties.class_(Halogen_Themes_Bootstrap4.carouselIndicators) ])([ renderli("carouselControls")(0) ]), Halogen_HTML_Elements.div([ Halogen_HTML_Properties.class_(Halogen_Themes_Bootstrap4.carouselInner) ])([ renderSlider("./image/banner_01.jpeg")("https://mp.weixin.qq.com/s/xBamclrgnW5YDzCyLQFavw") ]), Halogen_HTML_Elements.a([ Halogen_HTML_Properties.class_(Halogen_Themes_Bootstrap4.carouselControlPrev), Halogen_HTML_Properties.href("#carouselControls"), attr_("role")("button"), attr_("data-slide")("prev") ])([ Halogen_HTML_Elements.span([ Halogen_HTML_Properties.class_(Halogen_Themes_Bootstrap4.carouselControlPrevIcon), attr_("aria-hidder")("true") ])([  ]), Halogen_HTML_Elements.span([ Halogen_HTML_Properties.class_(Halogen_Themes_Bootstrap4.srOnly) ])([ Halogen_HTML_Core.text("Previous") ]) ]), Halogen_HTML_Elements.a([ Halogen_HTML_Properties.class_(Halogen_Themes_Bootstrap4.carouselControlNext), Halogen_HTML_Properties.href("#carouselControls"), attr_("role")("button"), attr_("data-slide")("next") ])([ Halogen_HTML_Elements.span([ Halogen_HTML_Properties.class_(Halogen_Themes_Bootstrap4.carouselControlNextIcon), attr_("aria-hidder")("true") ])([  ]), Halogen_HTML_Elements.span([ Halogen_HTML_Properties.class_(Halogen_Themes_Bootstrap4.srOnly) ])([ Halogen_HTML_Core.text("Next") ]) ]) ]) ]);
   var style = attr_("style");
   var renderCommodity = function (com) {
       return function (n) {
           var pLeftOrRight = (function () {
-              var $12 = Data_EuclideanRing.mod(Data_EuclideanRing.euclideanRingInt)(n)(2) === 0;
-              if ($12) {
+              var $13 = Data_EuclideanRing.mod(Data_EuclideanRing.euclideanRingInt)(n)(2) === 0;
+              if ($13) {
                   return "pr-md-1 pl-md-0";
               };
               return "pr-md-0 pl-md-1";
           })();
-          return Halogen_HTML_Elements.a([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd6)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.card)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.my2)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.border0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(pLeftOrRight)(Halogen_Themes_Bootstrap4.bgTransparent))))))), Conduit_Component_Utils.safeHref(Yzmall_Data_Route.CommodityInfo.create(Data_Maybe.fromJust()(Slug.generate(Data_Show.show(Data_Show.showInt)(com.id))))) ])([ Halogen_HTML_Elements.img([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.cardImgTop)(pLeftOrRight)), Halogen_HTML_Properties.src(com.thumbnail) ]), Halogen_HTML_Elements.div([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.cardBody)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.row)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.py1)(Halogen_Themes_Bootstrap4.alignMiddle))))) ])([ Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.col9) ])([ Halogen_HTML_Elements.p([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.cardText)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textTruncate)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.pl1)))), attr_("style")("color: #DFDBC6") ])([ Halogen_HTML_Core.text(com.name) ]) ]), Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.col3) ])([ Halogen_HTML_Elements.small([ attr_("style")("color: #DFDBC6"), cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.floatRight)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.pr1)(Halogen_Themes_Bootstrap4.pt1))) ])([ Halogen_HTML_Core.text("\u9500\u91cf:" + Data_Show.show(Data_Show.showInt)(com.sale)) ]) ]), Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.col6) ])([ Halogen_HTML_Elements.b([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.cardText)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.pl1))), style("font-size: 150%; color: #F6C17F") ])([ Halogen_HTML_Core.text("\uffe5" + Data_Show.show(Data_Show.showNumber)(com.price)) ]) ]), Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.col6) ])([ Halogen_HTML_Elements.b([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.floatRight)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.pr1)(Halogen_Themes_Bootstrap4.pt1))), style("color: #F6C17F") ])([ Halogen_HTML_Core.text("(\u8d60\u9001" + (Data_Show.show(Data_Show.showNumber)(com.gold) + "\u91d1\u5e01)")) ]) ]) ]) ]);
+          return Halogen_HTML_Elements.a([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd6)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.card)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.my2)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.border0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(pLeftOrRight)(Halogen_Themes_Bootstrap4.bgTransparent))))))), Conduit_Component_Utils.safeHref(Yzmall_Data_Route.CommodityInfo.create(Data_Maybe.fromJust()(Slug.generate(Data_Show.show(Data_Show.showInt)(com.id))))), style("text-decoration:none;") ])([ Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.cardImgTop) ])(Data_Semigroup.append(Data_Semigroup.semigroupArray)([ Halogen_HTML_Elements.img([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.cardImgTop)(pLeftOrRight)), Halogen_HTML_Properties.src(com.thumbnail) ]) ])((function () {
+              var $14 = com.stock > 0;
+              if ($14) {
+                  return [  ];
+              };
+              return [ Halogen_HTML_Elements.img([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.cardImgTop)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.cardImgOverlay)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.p0)(pLeftOrRight)))), style("position: absolute"), Halogen_HTML_Properties.src("./image/none.png") ]) ];
+          })())), Halogen_HTML_Elements.div([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.cardBody)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.row)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.py1)(Halogen_Themes_Bootstrap4.alignMiddle))))) ])([ Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.col9) ])([ Halogen_HTML_Elements.p([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.cardText)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textTruncate)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.pl1)))), attr_("style")("color: #DFDBC6") ])([ Halogen_HTML_Core.text(com.name) ]) ]), Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.col3) ])([ Halogen_HTML_Elements.small([ attr_("style")("color: #DFDBC6"), cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.floatRight)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.pr1)(Halogen_Themes_Bootstrap4.pt1))) ])([ Halogen_HTML_Core.text("\u9500\u91cf:" + Data_Show.show(Data_Show.showInt)(com.sale)) ]) ]), Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.col6) ])([ Halogen_HTML_Elements.b([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.cardText)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.pl1))), style("font-size: 150%; color: #F6C17F") ])([ Halogen_HTML_Core.text("\uffe5" + Data_Show.show(Data_Show.showNumber)(com.price)) ]) ]) ]) ]);
       };
   };
-  var renderFooter = Halogen_HTML_Elements.div([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textDark)(Halogen_Themes_Bootstrap4.justifyContentCenter)))), style("height: 160px; padding-top: 2.8rem; font-size: 24; background-position: top center; background-image: url(" + ($$String.bgFooter + ")")) ])([ Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.mxAuto) ])([ Halogen_HTML_Elements.a([ Halogen_HTML_Properties.href("#"), cls(Halogen_Themes_Bootstrap4.textDark) ])([ Halogen_HTML_Core.text("\u8d2d\u4e70\u6d41\u7a0b") ]), Halogen_HTML_Core.text(" | "), Halogen_HTML_Elements.a([ Halogen_HTML_Properties.href("#"), cls(Halogen_Themes_Bootstrap4.textDark) ])([ Halogen_HTML_Core.text("\u9000\u6362\u8d27\u653f\u7b56") ]), Halogen_HTML_Core.text(" | "), Halogen_HTML_Elements.a([ Halogen_HTML_Properties.href("#"), cls(Halogen_Themes_Bootstrap4.textDark) ])([ Halogen_HTML_Core.text("\u5173\u4e8e\u6211\u4eec") ]) ]), Halogen_HTML_Elements.div([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.mt2)) ])([ Halogen_HTML_Elements.a([ Halogen_HTML_Properties.href("#"), cls(Halogen_Themes_Bootstrap4.textDark) ])([ Halogen_HTML_Core.text("\u4fdd\u5b9a\u7965\u7434\u7f51\u7edc\u79d1\u6280\u6709\u9650\u516c\u53f8") ]) ]), Halogen_HTML_Elements.div([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.mt2)) ])([ Halogen_HTML_Core.text("\u5180ICP\u590719001701\u53f7-1") ]) ]);
-
-  /**
- * 
- * 
- * <form class="form-inline my-2 my-lg-0">
- *       <input class="form-control mr-sm-2" type="search" placeholder="Search" aria-label="Search">
- *       <button class="btn btn-outline-success my-2 my-sm-0" type="submit">Search</button>
- *     </form>
- */  
   var renderHeader = Halogen_HTML_Elements.div([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dNone)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)("d-md-block")(Halogen_Themes_Bootstrap4.bgTransparent)))), style("height: 128px; background-image: url(" + ($$String.bgHeader + ")")) ])([ Halogen_HTML_Elements.div([ cls(Halogen_Themes_Bootstrap4.container) ])([ Halogen_HTML_Elements.img([ Halogen_HTML_Properties.src($$String.logoTitle) ]) ]) ]);
-
-  // | Navbar
   var append = function (a) {
       return function (b) {
           return Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(a)(b);
       };
   };
-  var renderNavBar = (function () {
-      var renderNavItem = function (str) {
-          return function (n) {
-              return Halogen_HTML_Elements.li([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.navItem)((function () {
-                  var $13 = n === 0;
-                  if ($13) {
-                      return Halogen_Themes_Bootstrap4.active;
-                  };
-                  return "";
-              })())) ])([ Halogen_HTML_Elements.a([ cls(Halogen_Themes_Bootstrap4.navLink), Conduit_Component_Utils.safeHref(Yzmall_Data_Route.TradeCenter.value) ])([ Halogen_HTML_Core.text(str) ]) ]);
-          };
-      };
-      return Halogen_HTML_Elements.nav([ Halogen_HTML_Properties.class_(append(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.navbar)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.navbarExpandMd)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.navbarDark)(Halogen_Themes_Bootstrap4.bgTransparent))))("sticky-top")) ])([ Halogen_HTML_Elements.div([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Halogen_Themes_Bootstrap4.px0)) ])([ Halogen_HTML_Elements.a([ cls(Halogen_Themes_Bootstrap4.navbarBrand), Conduit_Component_Utils.safeHref(Yzmall_Data_Route.RegularCommodity.value) ])([ Halogen_HTML_Elements.p([ cls(Halogen_Themes_Bootstrap4.m0), style("color: #ffe8bb") ])([ Halogen_HTML_Core.text("\u94f6\u6d32\u56fd\u9645") ]) ]), Halogen_HTML_Elements.button([ Halogen_HTML_Properties.class_(Halogen_Themes_Bootstrap4.navbarToggler), attr_("data-toggle")("collapse"), attr_("data-target")("#navbarNav"), attr_("type")("button") ])([ Halogen_HTML_Elements.span([ cls(Halogen_Themes_Bootstrap4.navbarTogglerIcon) ])([  ]) ]), Halogen_HTML_Elements.div([ cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.collapse)(Halogen_Themes_Bootstrap4.navbarCollapse)), attr_("id")("navbarNav") ])([ Halogen_HTML_Elements.ul([ cls(Halogen_Themes_Bootstrap4.navbarNav) ])(foreach_([ "\u6b63\u4ef7\u5546\u54c1", "\u7279\u4ef7\u5546\u54c1", "\u4ea4\u6613\u4e2d\u5fc3", "\u4e2a\u4eba\u4e2d\u5fc3" ])(renderNavItem)), Halogen_HTML_Elements.button([ cls(append(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnOutlineDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.my2)(Halogen_Themes_Bootstrap4.mlAuto))))("my-sm-0")), attr_("data-toggle")("modal"), attr_("data-target")("#loginModal") ])([ Halogen_HTML_Core.text("\u767b\u5f55") ]), Halogen_HTML_Elements.button([ cls(append(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.my2)(Halogen_Themes_Bootstrap4.ml3))))("my-sm-0")), attr_("data-toggle")("modal"), attr_("data-target")("#registerModal") ])([ Halogen_HTML_Core.text("\u6ce8\u518c") ]) ]) ]) ]);
-  })();
   exports["renderCommodity"] = renderCommodity;
   exports["attr_"] = attr_;
   exports["style"] = style;
@@ -31645,9 +32858,10 @@ var PS = {};
   exports["append"] = append;
   exports["cls"] = cls;
   exports["renderHeader"] = renderHeader;
-  exports["renderNavBar"] = renderNavBar;
   exports["renderFooter"] = renderFooter;
   exports["renderModal"] = renderModal;
+  exports["encodePhone"] = encodePhone;
+  exports["unsafeSlug"] = unsafeSlug;
 })(PS["Yzmall.Utils"] = PS["Yzmall.Utils"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
@@ -31739,122 +32953,42 @@ var PS = {};
           };
       };
   };
+  var defaultRequest = function (v) {
+      return function (v1) {
+          var v2 = (function () {
+              if (v1.method instanceof Get) {
+                  return new Data_Tuple.Tuple(Data_HTTP_Method.GET.value, Data_Maybe.Nothing.value);
+              };
+              if (v1.method instanceof Post) {
+                  return new Data_Tuple.Tuple(Data_HTTP_Method.POST.value, v1.method.value0);
+              };
+              if (v1.method instanceof Put) {
+                  return new Data_Tuple.Tuple(Data_HTTP_Method.PUT.value, v1.method.value0);
+              };
+              if (v1.method instanceof Delete) {
+                  return new Data_Tuple.Tuple(Data_HTTP_Method.DELETE.value, Data_Maybe.Nothing.value);
+              };
+              throw new Error("Failed pattern match at Yzmall.Api.Request line 94, column 23 - line 98, column 35: " + [ v1.method.constructor.name ]);
+          })();
+          return {
+              method: new Data_Either.Left(v2.value0),
+              url: v + Routing_Duplex.print(Yzmall_Api_Endpoint.endpointCodec)(v1.endpoint),
+              headers: [ new Affjax_RequestHeader.RequestHeader("Content-Type", "application/x-www-form-urlencode") ],
+              content: Data_Functor.map(Data_Maybe.functorMaybe)(Affjax_RequestBody.json)(v2.value1),
+              username: Data_Maybe.Nothing.value,
+              password: Data_Maybe.Nothing.value,
+              withCredentials: true,
+              responseFormat: Affjax_ResponseFormat.json
+          };
+      };
+  };
   exports["Get"] = Get;
   exports["Post"] = Post;
   exports["Put"] = Put;
   exports["Delete"] = Delete;
+  exports["defaultRequest"] = defaultRequest;
   exports["defaultRequestForm"] = defaultRequestForm;
 })(PS["Yzmall.Api.Request"] = PS["Yzmall.Api.Request"] || {});
-(function(exports) {
-  // Generated by purs version 0.12.1
-  "use strict";
-  var Control_Applicative = PS["Control.Applicative"];
-  var Control_Bind = PS["Control.Bind"];
-  var Data_Argonaut_Core = PS["Data.Argonaut.Core"];
-  var Data_Argonaut_Decode = PS["Data.Argonaut.Decode"];
-  var Data_Argonaut_Decode_Class = PS["Data.Argonaut.Decode.Class"];
-  var Data_Argonaut_Decode_Combinators = PS["Data.Argonaut.Decode.Combinators"];
-  var Data_Either = PS["Data.Either"];
-  var Data_Functor = PS["Data.Functor"];
-  var Data_Maybe = PS["Data.Maybe"];
-  var Prelude = PS["Prelude"];
-  var Yzmall_Data_Phone = PS["Yzmall.Data.Phone"];                 
-  var ADMIN = (function () {
-      function ADMIN() {
-
-      };
-      ADMIN.value = new ADMIN();
-      return ADMIN;
-  })();
-  var CUSTOMER = (function () {
-      function CUSTOMER() {
-
-      };
-      CUSTOMER.value = new CUSTOMER();
-      return CUSTOMER;
-  })();
-  var SUPPLIER = (function () {
-      function SUPPLIER() {
-
-      };
-      SUPPLIER.value = new SUPPLIER();
-      return SUPPLIER;
-  })();
-  var mkRole = function (v) {
-      if (v === "ADMIN") {
-          return ADMIN.value;
-      };
-      if (v === "SUPPLIER") {
-          return SUPPLIER.value;
-      };
-      return CUSTOMER.value;
-  };
-  var decodeAccount = function (json) {
-      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Class.decodeJson(Data_Argonaut_Decode_Class.decodeForeignObject(Data_Argonaut_Decode_Class.decodeJsonJson))(json))(function (v) {
-          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("id"))(function (v1) {
-              return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonInt))(v)("inviter"))(function (v2) {
-                  return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonString))(v)("nickname"))(function (v3) {
-                      return Control_Bind.bind(Data_Either.bindEither)(Data_Functor.map(Data_Either.functorEither)(Yzmall_Data_Phone.Phone)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("phone")))(function (v4) {
-                          return Control_Bind.bind(Data_Either.bindEither)(Data_Functor.map(Data_Either.functorEither)(mkRole)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("role")))(function (v5) {
-                              return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("grade"))(function (v6) {
-                                  return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonString))(v)("name"))(function (v7) {
-                                      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonString))(v)("idCard"))(function (v8) {
-                                          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("gold"))(function (v9) {
-                                              return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("regularCommodityCost"))(function (v10) {
-                                                  return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("specialCommodityCost"))(function (v11) {
-                                                      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("commissionBalance"))(function (v12) {
-                                                          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("commissionSellFacility"))(function (v13) {
-                                                              return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("commissionSell"))(function (v14) {
-                                                                  return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("rebateBalance"))(function (v15) {
-                                                                      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("rebateSell"))(function (v16) {
-                                                                          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonInt))(v)("defaultAddress"))(function (v17) {
-                                                                              return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonInt))(v)("defaultBankCard"))(function (v18) {
-                                                                                  return Control_Applicative.pure(Data_Either.applicativeEither)({
-                                                                                      id: v1,
-                                                                                      inviter: v2,
-                                                                                      nickname: v3,
-                                                                                      phone: v4,
-                                                                                      role: v5,
-                                                                                      grade: v6,
-                                                                                      name: v7,
-                                                                                      idCard: v8,
-                                                                                      gold: v9,
-                                                                                      regularCommodityCost: v10,
-                                                                                      specialCommodityCost: v11,
-                                                                                      commissionBalance: v12,
-                                                                                      commissionSellFacility: v13,
-                                                                                      commissionSell: v14,
-                                                                                      rebateBalance: v15,
-                                                                                      rebateSell: v16,
-                                                                                      defaultAddress: v17,
-                                                                                      defaultBankCard: v18
-                                                                                  });
-                                                                              });
-                                                                          });
-                                                                      });
-                                                                  });
-                                                              });
-                                                          });
-                                                      });
-                                                  });
-                                              });
-                                          });
-                                      });
-                                  });
-                              });
-                          });
-                      });
-                  });
-              });
-          });
-      });
-  };
-  exports["ADMIN"] = ADMIN;
-  exports["CUSTOMER"] = CUSTOMER;
-  exports["SUPPLIER"] = SUPPLIER;
-  exports["decodeAccount"] = decodeAccount;
-  exports["mkRole"] = mkRole;
-})(PS["Yzmall.Data.Account"] = PS["Yzmall.Data.Account"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
   "use strict";
@@ -31866,20 +33000,75 @@ var PS = {};
   var Prelude = PS["Prelude"];
   var Yzmall_Api_Request = PS["Yzmall.Api.Request"];
   var Yzmall_Data_Account = PS["Yzmall.Data.Account"];                 
-  var ManageAccount = function (Monad0, getAccountInfo, login) {
+  var ManageAccount = function (Monad0, bindAlipay, createAccount, createVcode, getAccountInfo, getInvitees, login, logout, resetPassword, setName) {
       this.Monad0 = Monad0;
+      this.bindAlipay = bindAlipay;
+      this.createAccount = createAccount;
+      this.createVcode = createVcode;
       this.getAccountInfo = getAccountInfo;
+      this.getInvitees = getInvitees;
       this.login = login;
+      this.logout = logout;
+      this.resetPassword = resetPassword;
+      this.setName = setName;
+  };
+  var setName = function (dict) {
+      return dict.setName;
+  };
+  var resetPassword = function (dict) {
+      return dict.resetPassword;
+  };
+  var logout = function (dict) {
+      return dict.logout;
   };
   var login = function (dict) {
       return dict.login;
   };
+  var getInvitees = function (dict) {
+      return dict.getInvitees;
+  };
   var getAccountInfo = function (dict) {
       return dict.getAccountInfo;
   };
+  var createVcode = function (dict) {
+      return dict.createVcode;
+  };
+  var createAccount = function (dict) {
+      return dict.createAccount;
+  };
+  var bindAlipay = function (dict) {
+      return dict.bindAlipay;
+  };
+  var manageAccountHalogenM = function (dictManageAccount) {
+      return new ManageAccount(function () {
+          return Halogen_Query_HalogenM.monadHalogenM;
+      }, function ($1) {
+          return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageAccount.Monad0())(bindAlipay(dictManageAccount)($1));
+      }, function ($2) {
+          return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageAccount.Monad0())(createAccount(dictManageAccount)($2));
+      }, function ($3) {
+          return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageAccount.Monad0())(createVcode(dictManageAccount)($3));
+      }, Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageAccount.Monad0())(getAccountInfo(dictManageAccount)), Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageAccount.Monad0())(getInvitees(dictManageAccount)), function ($4) {
+          return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageAccount.Monad0())(login(dictManageAccount)($4));
+      }, Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageAccount.Monad0())(logout(dictManageAccount)), function ($5) {
+          return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageAccount.Monad0())(resetPassword(dictManageAccount)($5));
+      }, function (p) {
+          return function ($6) {
+              return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageAccount.Monad0())(setName(dictManageAccount)(p)($6));
+          };
+      });
+  };
+  exports["bindAlipay"] = bindAlipay;
+  exports["createAccount"] = createAccount;
+  exports["createVcode"] = createVcode;
   exports["getAccountInfo"] = getAccountInfo;
+  exports["getInvitees"] = getInvitees;
   exports["login"] = login;
+  exports["logout"] = logout;
+  exports["resetPassword"] = resetPassword;
+  exports["setName"] = setName;
   exports["ManageAccount"] = ManageAccount;
+  exports["manageAccountHalogenM"] = manageAccountHalogenM;
 })(PS["Yzmall.Api.Capablity.Resource.Account"] = PS["Yzmall.Api.Capablity.Resource.Account"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
@@ -32014,14 +33203,7 @@ var PS = {};
   exports["mkLog"] = mkLog;
 })(PS["Yzmall.Data.Log"] = PS["Yzmall.Data.Log"] || {});
 (function(exports) {
-  
-  // | A capability representing the ability to save status information to some output, which could 
-  // | be the console, an external service like Splunk, or to the file system for testing purposes. 
-  // | The implementation can be freely swapped out without changing any application code besides 
-  // | the application monad, `Conduit.AppM`.
-  // |
-  // | To learn more about why we use capabilities and this architecture, please see the guide:
-  // | https://thomashoneyman.com/guides/real-world-halogen/push-effects-to-the-edges/
+  // Generated by purs version 0.12.1
   "use strict";
   var Control_Applicative = PS["Control.Applicative"];
   var Control_Apply = PS["Control.Apply"];
@@ -32036,12 +33218,6 @@ var PS = {};
   var Prelude = PS["Prelude"];
   var Yzmall_Capability_Now = PS["Yzmall.Capability.Now"];
   var Yzmall_Data_Log = PS["Yzmall.Data.Log"];                 
-
-  // | We require a strict format for the messages that we log so that we can search this structured 
-  // | data from our logging service later on. We can enforce this with the type system by using the 
-  // | `Log` type from `Conduit.Data.Log`. This type can only be constructed using helper functions
-  // | in that module, which enforce the correct format. However, we'll leave it up to the implementer
-  // | to decide what to do with the log once created. 
   var LogMessages = function (Monad0, logMessage) {
       this.Monad0 = Monad0;
       this.logMessage = logMessage;
@@ -32049,11 +33225,6 @@ var PS = {};
   var logMessage = function (dict) {
       return dict.logMessage;
   };
-
-  // | Next, we'll provide a few helper functions to help users easily create and dispatch logs
-  // | from anywhere in the application. Each helper composes a couple of small functions together
-  // | so that we've got less to remember later on.
-  // | Log a message to given a particular `LogType` 
   var log = function (dictLogMessages) {
       return function (dictNow) {
           return function (reason) {
@@ -32061,8 +33232,6 @@ var PS = {};
           };
       };
   };
-
-  // | Log a message as an error
   var logError = function (dictLogMessages) {
       return function (dictNow) {
           return log(dictLogMessages)(dictNow)(Yzmall_Data_Log["Error"].value);
@@ -32076,7 +33245,307 @@ var PS = {};
 (function(exports) {
   // Generated by purs version 0.12.1
   "use strict";
+  var Control_Applicative = PS["Control.Applicative"];
+  var Control_Bind = PS["Control.Bind"];
+  var Data_Argonaut_Core = PS["Data.Argonaut.Core"];
+  var Data_Argonaut_Decode = PS["Data.Argonaut.Decode"];
+  var Data_Argonaut_Decode_Class = PS["Data.Argonaut.Decode.Class"];
+  var Data_Argonaut_Decode_Combinators = PS["Data.Argonaut.Decode.Combinators"];
+  var Data_Either = PS["Data.Either"];
+  var Prelude = PS["Prelude"];                 
+  var decodeErrorMsg = function (json) {
+      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Class.decodeJson(Data_Argonaut_Decode_Class.decodeForeignObject(Data_Argonaut_Decode_Class.decodeJsonJson))(json))(function (v) {
+          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("errorCode"))(function (v1) {
+              return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("content"))(function (v2) {
+                  return Control_Applicative.pure(Data_Either.applicativeEither)({
+                      content: v2,
+                      errorCode: v1
+                  });
+              });
+          });
+      });
+  };
+  exports["decodeErrorMsg"] = decodeErrorMsg;
+})(PS["Yzmall.Data.ErrorMsg"] = PS["Yzmall.Data.ErrorMsg"] || {});
+(function(exports) {exports.openLoginModal = function () {
+    $("#loginModal").modal("show");
+  }
+
+  exports.openRegisterModal = function (str) {
+    return function () {
+      $("#registerModal").modal("show");
+      document.getElementById("validation-inviter").value = str;
+    }
+  }
+
+  exports.closeLoginModal = function () {
+    $("#loginModal").modal("hide");
+  }
+
+  exports.closeRegisterModal = function () {
+    $("#registerModal").modal("hide");
+  }
+
+  exports.openBindAlipayModal = function () {
+    $('#bindAlipayModal').modal({
+      backdrop: 'static',
+      keyboard: false
+  })
+  }
+
+  exports.closeBindAlipayModal = function () {
+    $("#bindAlipayModal").modal("hide");
+  }
+
+  exports.getInputValue = function (inputId) {
+    return function () {
+      var input = document.getElementById(inputId);
+      if (input != undefined && input.value != undefined ) {
+          return input.value;
+      } else {
+        return ""
+      }
+    }
+  }
+
+  exports.getRadioBtnChecked = function (id) {
+    return function () {
+      var radioBtn = document.getElementById(id);
+      if (radioBtn != undefined && radioBtn.checked != undefined ) {
+        return radioBtn.checked;
+      } else {
+        return false
+      }
+    }
+  }
+
+  exports.alertMsg = function (msg) {
+    return function () {
+      window.alert(msg);
+    }
+  }
+
+
+  var commodities = {};
+  exports.initCommodities = function () {
+    sendHttpRequest("GET", "/public/commodity/", "").then(function (result) {
+      for (var i = 0; i < result.length; ++i) {
+        commodities[result[i].id] = result[i];
+      }
+    });
+  }
+
+  exports.getCommodityById = function (id) {
+    // return function () {
+      var result =  commodities[id];
+      if (result ) {
+        return result;
+      } else {
+        return { name : "已下架"} 
+      }
+    // }
+  }                                                 
+
+  function sendHttpRequest(type, uri, body) {
+    return new Promise(function (resolve, reject) {
+        var xhr = new XMLHttpRequest();
+        xhr.withCredentials = true;
+        xhr.onload = function () {
+            if ('' !== xhr.response && xhr.status == 200) {
+                resolve(JSON.parse(xhr.response));
+            } else {
+                reject(Error("Network Error"));
+            }
+        };
+        xhr.onerror = function() {
+            reject(Error("Network Error"));
+        }
+        if (type == "POST") {
+            xhr.open(type, "http://www.scix.vip/yzmall-server" + uri, true);
+            xhr.setRequestHeader("Content-Type", "application/x-www-form-urlencoded");
+            xhr.send(body);
+        } else if (type == "GET") {
+            xhr.open(type, "http://www.scix.vip/yzmall-server" + uri, true);
+            xhr.send(null);
+        } else if ("POST_JSON" == type) {
+            xhr.open("POST", "http://www.scix.vip/yzmall-server" + uri, true);
+            xhr.setRequestHeader("Content-Type", "application/json");
+            xhr.send(JSON.stringify(body));
+        }
+    });
+  }
+
+
+  exports.getInviterId = function () {
+    var href = window.location.href;
+    var index = href.indexOf('inviter_id=');
+    if (index == -1) {
+      return "";
+    } else {
+      return href.slice(index + 11);
+    }
+  }
+
+
+  exports.showProv = function () {
+      initMethod01();
+      var len = provice.length;
+      for (var i = 0; i < len; i++) {
+          var provOpt = document.createElement('option');
+          provOpt.innerText = provice[i]['name'];
+          provOpt.value = i;
+          prov.appendChild(provOpt);
+      }
+  }
+
+  function setInputFilter(textbox, inputFilter) {
+    ["input", "keydown", "keyup", "mousedown", "mouseup", "select", "contextmenu", "drop"].forEach(function(event) {
+      if (!textbox) {
+        return;
+      }
+      textbox.addEventListener(event, function() {
+        if (inputFilter(this.value)) {
+          this.oldValue = this.value;
+          this.oldSelectionStart = this.selectionStart;
+          this.oldSelectionEnd = this.selectionEnd;
+        } else if (this.hasOwnProperty("oldValue")) {
+          this.value = this.oldValue;
+          this.setSelectionRange(this.oldSelectionStart, this.oldSelectionEnd);
+        }
+      });
+    });
+  }
+
+
+  exports.setNumOnly = function (id) {
+    return function () {
+      setInputFilter(document.getElementById(id), function(value) {
+        return /^\d*$/.test(value); 
+      });
+    }
+  }
+})(PS["Yzmall.Page.Utils"] = PS["Yzmall.Page.Utils"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var $foreign = PS["Yzmall.Page.Utils"];
+  var Conduit_Component_Utils = PS["Conduit.Component.Utils"];
+  var Control_Semigroupoid = PS["Control.Semigroupoid"];
+  var Data_Eq = PS["Data.Eq"];
+  var Data_Function = PS["Data.Function"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Data_Semigroup = PS["Data.Semigroup"];
+  var Effect = PS["Effect"];
+  var Effect_Unsafe = PS["Effect.Unsafe"];
+  var Halogen = PS["Halogen"];
+  var Halogen_HTML = PS["Halogen.HTML"];
+  var Halogen_HTML_Core = PS["Halogen.HTML.Core"];
+  var Halogen_HTML_Elements = PS["Halogen.HTML.Elements"];
+  var Halogen_HTML_Events = PS["Halogen.HTML.Events"];
+  var Halogen_HTML_Properties = PS["Halogen.HTML.Properties"];
+  var Halogen_Themes_Bootstrap4 = PS["Halogen.Themes.Bootstrap4"];
+  var Partial_Unsafe = PS["Partial.Unsafe"];
+  var Prelude = PS["Prelude"];
+  var Yzmall_Data_Commodity = PS["Yzmall.Data.Commodity"];
+  var Yzmall_Data_Route = PS["Yzmall.Data.Route"];
+  var Yzmall_Utils = PS["Yzmall.Utils"];                 
+  var yellowColor = "color: #F6C17F;";
+  var unsafeAlert = function ($17) {
+      return Effect_Unsafe.unsafePerformEffect($foreign.alertMsg($17));
+  };
+  var renderInputGroupPassword = function (config) {
+      return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.inputGroup)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Halogen_Themes_Bootstrap4.mb2))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.inputGroupPrepend) ])([ Halogen_HTML_Elements.span([ Yzmall_Utils.attr_("id")(config.id + "-prepend"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.inputGroupText)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.justifyContentCenter))), Yzmall_Utils.style("width: 50px") ])([ Halogen_HTML_Elements.i([ Yzmall_Utils.attr_("class")(config.icon) ])([  ]) ]) ]), Halogen_HTML_Elements.input([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formControl), Yzmall_Utils.attr_("id")("validation-" + config.id), Halogen_HTML_Properties.placeholder(config.placeholder), Yzmall_Utils.attr_("value")(""), Halogen_HTML_Properties.required(config.required), Yzmall_Utils.attr_("type")("password") ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.invalidFeedback) ])([ Halogen_HTML_Core.text("") ]) ]);
+  };
+  var renderInputGroup = function (config) {
+      return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.inputGroup)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Halogen_Themes_Bootstrap4.mb2))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.inputGroupPrepend) ])([ Halogen_HTML_Elements.span([ Yzmall_Utils.attr_("id")(config.id + "-prepend"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.inputGroupText)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.justifyContentCenter))), Yzmall_Utils.style("width: 50px") ])([ Halogen_HTML_Elements.i([ Yzmall_Utils.attr_("class")(config.icon) ])([  ]) ]) ]), Halogen_HTML_Elements.input([ Yzmall_Utils.attr_("type")("text"), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formControl), Yzmall_Utils.attr_("id")("validation-" + config.id), Halogen_HTML_Properties.placeholder(config.placeholder), Yzmall_Utils.attr_("value")(""), Halogen_HTML_Properties.required(config.required) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.invalidFeedback) ])([ Halogen_HTML_Core.text("") ]) ]);
+  };
+  var renderBar = function (v) {
+      return function (route) {
+          var rightIcon = function (v1) {
+              if (v1) {
+                  return Halogen_HTML_Elements.i([ Yzmall_Utils.cls(Yzmall_Utils.append(Halogen_Themes_Bootstrap4.ml2)("fas fa-chevron-right")) ])([  ]);
+              };
+              if (!v1) {
+                  return Halogen_HTML_Core.text("");
+              };
+              throw new Error("Failed pattern match at Yzmall.Page.Utils line 153, column 3 - line 156, column 7: " + [ v1.constructor.name ]);
+          };
+          var renderRight = function (str) {
+              if (str instanceof Data_Maybe.Just) {
+                  return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto) ])([ Halogen_HTML_Core.text(str.value0), rightIcon(v.withRightIcon) ]);
+              };
+              if (str instanceof Data_Maybe.Nothing) {
+                  return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto) ])([ rightIcon(v.withRightIcon) ]);
+              };
+              throw new Error("Failed pattern match at Yzmall.Page.Utils line 160, column 5 - line 170, column 36: " + [ str.constructor.name ]);
+          };
+          var leftImg = function (v1) {
+              if (v1 instanceof Data_Maybe.Just) {
+                  return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr1) ])([ Halogen_HTML_Elements.img([ Halogen_HTML_Properties.src(v1.value0), Yzmall_Utils.style("height: 27px; width: 27px") ]) ]);
+              };
+              if (v1 instanceof Data_Maybe.Nothing) {
+                  return Halogen_HTML_Core.text("");
+              };
+              throw new Error("Failed pattern match at Yzmall.Page.Utils line 143, column 3 - line 150, column 6: " + [ v1.constructor.name ]);
+          };
+          return Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItem)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.rounded0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemDark)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemAction)(Halogen_Themes_Bootstrap4.textWhite)))))))), (function () {
+              var $11 = Data_Maybe.isJust(route);
+              if ($11) {
+                  return Conduit_Component_Utils.safeHref(Data_Maybe.fromJust()(route));
+              };
+              return Yzmall_Utils.attr_("nothing")("nothing");
+          })(), Yzmall_Utils.style("font-size: 15px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRow)(Halogen_Themes_Bootstrap4.alignItemsCenter))) ])([ leftImg(v.leftIcon), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text(v.name) ]) ]), renderRight(v.rightDesc) ]);
+      };
+  };
+  var pcOnly = Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dNone)("d-md-flex");
+  var mobileOnly = Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)("d-md-none");
+  var lightYellowColor = "color: #f8f2d8;";
+  var lightBlueColor = "color: #B6F9FF;";
+  var greyColor = "color: #adadad;";
+  var greyBg = "background-color: #414040;";
+  var existWhenZero = function (n) {
+      return function (cn) {
+          var $16 = n === 0;
+          if ($16) {
+              return cn;
+          };
+          return "";
+      };
+  };
+  var darkRedColor = "color: #ff8181;";
+  exports["renderInputGroup"] = renderInputGroup;
+  exports["renderInputGroupPassword"] = renderInputGroupPassword;
+  exports["pcOnly"] = pcOnly;
+  exports["mobileOnly"] = mobileOnly;
+  exports["yellowColor"] = yellowColor;
+  exports["lightYellowColor"] = lightYellowColor;
+  exports["existWhenZero"] = existWhenZero;
+  exports["greyBg"] = greyBg;
+  exports["greyColor"] = greyColor;
+  exports["darkRedColor"] = darkRedColor;
+  exports["lightBlueColor"] = lightBlueColor;
+  exports["renderBar"] = renderBar;
+  exports["unsafeAlert"] = unsafeAlert;
+  exports["openBindAlipayModal"] = $foreign.openBindAlipayModal;
+  exports["closeBindAlipayModal"] = $foreign.closeBindAlipayModal;
+  exports["closeLoginModal"] = $foreign.closeLoginModal;
+  exports["closeRegisterModal"] = $foreign.closeRegisterModal;
+  exports["openLoginModal"] = $foreign.openLoginModal;
+  exports["openRegisterModal"] = $foreign.openRegisterModal;
+  exports["getInputValue"] = $foreign.getInputValue;
+  exports["alertMsg"] = $foreign.alertMsg;
+  exports["getRadioBtnChecked"] = $foreign.getRadioBtnChecked;
+  exports["initCommodities"] = $foreign.initCommodities;
+  exports["getCommodityById"] = $foreign.getCommodityById;
+  exports["getInviterId"] = $foreign.getInviterId;
+  exports["showProv"] = $foreign.showProv;
+  exports["setNumOnly"] = $foreign.setNumOnly;
+})(PS["Yzmall.Page.Utils"] = PS["Yzmall.Page.Utils"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
   var Affjax = PS["Affjax"];
+  var Affjax_StatusCode = PS["Affjax.StatusCode"];
   var Control_Applicative = PS["Control.Applicative"];
   var Control_Apply = PS["Control.Apply"];
   var Control_Bind = PS["Control.Bind"];
@@ -32089,17 +33558,52 @@ var PS = {};
   var Data_Either = PS["Data.Either"];
   var Data_Function = PS["Data.Function"];
   var Data_Maybe = PS["Data.Maybe"];
+  var Data_Unit = PS["Data.Unit"];
+  var Effect = PS["Effect"];
   var Effect_Aff_Class = PS["Effect.Aff.Class"];
+  var Effect_Class = PS["Effect.Class"];
   var Prelude = PS["Prelude"];
+  var Web_XHR_XMLHttpRequest = PS["Web.XHR.XMLHttpRequest"];
+  var Yzmall_Api_Endpoint = PS["Yzmall.Api.Endpoint"];
   var Yzmall_Api_Request = PS["Yzmall.Api.Request"];
   var Yzmall_Capability_LogMessages = PS["Yzmall.Capability.LogMessages"];
-  var Yzmall_Capability_Now = PS["Yzmall.Capability.Now"];                 
+  var Yzmall_Capability_Now = PS["Yzmall.Capability.Now"];
+  var Yzmall_Data_ErrorMsg = PS["Yzmall.Data.ErrorMsg"];
+  var Yzmall_Page_Utils = PS["Yzmall.Page.Utils"];                 
+  var handleError = function (status) {
+      return function (body) {
+          return function (endpoint) {
+              return function __do() {
+                  (function () {
+                      if (status === 200) {
+                          return Data_Unit.unit;
+                      };
+                      var errMsg = Control_Bind.bindFlipped(Data_Either.bindEither)(Yzmall_Data_ErrorMsg.decodeErrorMsg)(body);
+                      if (errMsg instanceof Data_Either.Left) {
+                          if (endpoint instanceof Yzmall_Api_Endpoint.Login) {
+                              return Yzmall_Page_Utils.unsafeAlert("\u767b\u5f55\u5931\u8d25, \u624b\u673a\u53f7\u6216\u5bc6\u7801\u4e0d\u6b63\u786e");
+                          };
+                          return Data_Unit.unit;
+                      };
+                      if (errMsg instanceof Data_Either.Right) {
+                          return Yzmall_Page_Utils.unsafeAlert(errMsg.value0.content);
+                      };
+                      throw new Error("Failed pattern match at Yzmall.Api.Utils line 46, column 7 - line 51, column 52: " + [ errMsg.constructor.name ]);
+                  })();
+                  return Data_Unit.unit;
+              };
+          };
+      };
+  };
   var mkRequest = function (dictMonadAff) {
       return function (dictMonadAsk) {
           return function (opts) {
               return Control_Bind.bind(((dictMonadAff.MonadEffect0()).Monad0()).Bind1())(Control_Monad_Reader_Class.ask(dictMonadAsk))(function (v) {
                   return Control_Bind.bind(((dictMonadAff.MonadEffect0()).Monad0()).Bind1())(Effect_Aff_Class.liftAff(dictMonadAff)(Affjax.request(Yzmall_Api_Request.defaultRequestForm(v.baseUrl)(opts))))(function (v1) {
-                      return Control_Applicative.pure(((dictMonadAff.MonadEffect0()).Monad0()).Applicative0())(Data_Either.hush(v1.body));
+                      var body = Data_Either.hush(v1.body);
+                      return Control_Bind.discard(Control_Bind.discardUnit)(((dictMonadAff.MonadEffect0()).Monad0()).Bind1())(Effect_Class.liftEffect(dictMonadAff.MonadEffect0())(handleError(v1.status)(Data_Either.note("sth.")(body))(opts.endpoint)))(function () {
+                          return Control_Applicative.pure(((dictMonadAff.MonadEffect0()).Monad0()).Applicative0())(body);
+                      });
                   });
               });
           };
@@ -32120,40 +33624,828 @@ var PS = {};
                       if (v2 instanceof Data_Either.Right) {
                           return Control_Applicative.pure((dictLogMessages.Monad0()).Applicative0())(new Data_Maybe.Just(v2.value0));
                       };
-                      throw new Error("Failed pattern match at Yzmall.Api.Utils line 54, column 30 - line 56, column 41: " + [ v2.constructor.name ]);
+                      throw new Error("Failed pattern match at Yzmall.Api.Utils line 81, column 30 - line 83, column 41: " + [ v2.constructor.name ]);
                   };
-                  throw new Error("Failed pattern match at Yzmall.Api.Utils line 52, column 1 - line 52, column 103: " + [ v.constructor.name, v1.constructor.name ]);
+                  throw new Error("Failed pattern match at Yzmall.Api.Utils line 79, column 1 - line 79, column 103: " + [ v.constructor.name, v1.constructor.name ]);
               };
           };
       };
   };
   exports["mkRequest"] = mkRequest;
+  exports["handleError"] = handleError;
   exports["decode"] = decode;
 })(PS["Yzmall.Api.Utils"] = PS["Yzmall.Api.Utils"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
   "use strict";
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Semigroupoid = PS["Control.Semigroupoid"];
+  var Data_Argonaut_Decode = PS["Data.Argonaut.Decode"];
+  var Data_Argonaut_Decode_Class = PS["Data.Argonaut.Decode.Class"];
+  var Data_Array = PS["Data.Array"];
+  var Data_DateTime = PS["Data.DateTime"];
+  var Data_Decimal = PS["Data.Decimal"];
+  var Data_Either = PS["Data.Either"];
+  var Data_Formatter_DateTime = PS["Data.Formatter.DateTime"];
+  var Data_List = PS["Data.List"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Data_Newtype = PS["Data.Newtype"];
+  var Data_PreciseDateTime = PS["Data.PreciseDateTime"];
+  var Data_RFC3339String = PS["Data.RFC3339String"];
+  var Data_String = PS["Data.String"];
+  var Data_String_CodePoints = PS["Data.String.CodePoints"];
+  var Data_Time_PreciseDuration = PS["Data.Time.PreciseDuration"];
+  var Prelude = PS["Prelude"];                 
+  var PreciseDateTime = function (x) {
+      return x;
+  };
+  var toDisplayTime = function (v) {
+      return v;
+  };
+  var fromString = function ($3) {
+      return Data_Either.Right.create(PreciseDateTime($3));
+  };
+  exports["PreciseDateTime"] = PreciseDateTime;
+  exports["fromString"] = fromString;
+  exports["toDisplayTime"] = toDisplayTime;
+})(PS["Yzmall.Data.PreciseDateTime"] = PS["Yzmall.Data.PreciseDateTime"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Control_Applicative = PS["Control.Applicative"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Semigroupoid = PS["Control.Semigroupoid"];
+  var Data_Argonaut_Core = PS["Data.Argonaut.Core"];
+  var Data_Argonaut_Decode = PS["Data.Argonaut.Decode"];
+  var Data_Argonaut_Decode_Class = PS["Data.Argonaut.Decode.Class"];
+  var Data_Argonaut_Decode_Combinators = PS["Data.Argonaut.Decode.Combinators"];
+  var Data_Either = PS["Data.Either"];
+  var Data_Eq = PS["Data.Eq"];
+  var Data_Function = PS["Data.Function"];
+  var Data_Functor = PS["Data.Functor"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Data_Show = PS["Data.Show"];
+  var Data_Traversable = PS["Data.Traversable"];
+  var Halogen_HTML_Elements_Keyed = PS["Halogen.HTML.Elements.Keyed"];
+  var Prelude = PS["Prelude"];
+  var Type_Data_Boolean = PS["Type.Data.Boolean"];
+  var Yzmall_Data_PreciseDateTime = PS["Yzmall.Data.PreciseDateTime"];                 
+  var WaitForPayment = (function () {
+      function WaitForPayment() {
+
+      };
+      WaitForPayment.value = new WaitForPayment();
+      return WaitForPayment;
+  })();
+  var WaitForPaymentResult = (function () {
+      function WaitForPaymentResult() {
+
+      };
+      WaitForPaymentResult.value = new WaitForPaymentResult();
+      return WaitForPaymentResult;
+  })();
+  var WaitForDeliver = (function () {
+      function WaitForDeliver() {
+
+      };
+      WaitForDeliver.value = new WaitForDeliver();
+      return WaitForDeliver;
+  })();
+  var Delivered = (function () {
+      function Delivered() {
+
+      };
+      Delivered.value = new Delivered();
+      return Delivered;
+  })();
+  var WaitForRefund = (function () {
+      function WaitForRefund() {
+
+      };
+      WaitForRefund.value = new WaitForRefund();
+      return WaitForRefund;
+  })();
+  var Refunded = (function () {
+      function Refunded() {
+
+      };
+      Refunded.value = new Refunded();
+      return Refunded;
+  })();
+  var status = function (v) {
+      if (v === "WAIT_FOR_PAYMENT") {
+          return WaitForPayment.value;
+      };
+      if (v === "WAIT_FOR_PAYMENT_RESULT") {
+          return WaitForPaymentResult.value;
+      };
+      if (v === "WAIT_FOR_DELIVER") {
+          return WaitForDeliver.value;
+      };
+      if (v === "DELIVERED") {
+          return Delivered.value;
+      };
+      if (v === "WAIT_FOR_REFUND") {
+          return WaitForRefund.value;
+      };
+      return Refunded.value;
+  };
+  var showOrderStatus = new Data_Show.Show(function (v) {
+      if (v instanceof WaitForPayment) {
+          return "\u5f85\u652f\u4ed8";
+      };
+      if (v instanceof WaitForPaymentResult) {
+          return "\u7b49\u5f85\u652f\u4ed8\u7ed3\u679c";
+      };
+      if (v instanceof WaitForDeliver) {
+          return "\u5f85\u53d1\u8d27";
+      };
+      if (v instanceof Delivered) {
+          return "\u5df2\u53d1\u8d27";
+      };
+      if (v instanceof WaitForRefund) {
+          return "\u7b49\u5f85\u9000\u6b3e";
+      };
+      if (v instanceof Refunded) {
+          return "\u5df2\u9000\u6b3e";
+      };
+      throw new Error("Failed pattern match at Yzmalal.Data.CommodityOrder line 25, column 1 - line 25, column 45: " + [ v.constructor.name ]);
+  });
+  var parseTM = function (v) {
+      if (v instanceof Data_Either.Left) {
+          return new Data_Either.Right(Data_Maybe.Nothing.value);
+      };
+      if (v instanceof Data_Either.Right) {
+          var r = Yzmall_Data_PreciseDateTime.fromString(v.value0);
+          if (r instanceof Data_Either.Left) {
+              return new Data_Either.Right(Data_Maybe.Nothing.value);
+          };
+          if (r instanceof Data_Either.Right) {
+              return Data_Either.Right.create(new Data_Maybe.Just(r.value0));
+          };
+          throw new Error("Failed pattern match at Yzmalal.Data.CommodityOrder line 95, column 3 - line 97, column 31: " + [ r.constructor.name ]);
+      };
+      throw new Error("Failed pattern match at Yzmalal.Data.CommodityOrder line 90, column 1 - line 90, column 73: " + [ v.constructor.name ]);
+  };
+  var eqOrderStatus = new Data_Eq.Eq(function (x) {
+      return function (y) {
+          if (x instanceof WaitForPayment && y instanceof WaitForPayment) {
+              return true;
+          };
+          if (x instanceof WaitForPaymentResult && y instanceof WaitForPaymentResult) {
+              return true;
+          };
+          if (x instanceof WaitForDeliver && y instanceof WaitForDeliver) {
+              return true;
+          };
+          if (x instanceof Delivered && y instanceof Delivered) {
+              return true;
+          };
+          if (x instanceof WaitForRefund && y instanceof WaitForRefund) {
+              return true;
+          };
+          if (x instanceof Refunded && y instanceof Refunded) {
+              return true;
+          };
+          return false;
+      };
+  });
+  var decodeCommodityOrder = function (json) {
+      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Class.decodeJson(Data_Argonaut_Decode_Class.decodeForeignObject(Data_Argonaut_Decode_Class.decodeJsonJson))(json))(function (v) {
+          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("id"))(function (v1) {
+              return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("accountId"))(function (v2) {
+                  return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("commodityId"))(function (v3) {
+                      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("tag"))(function (v4) {
+                          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("amount"))(function (v5) {
+                              return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("commissionCost"))(function (v6) {
+                                  return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("rebateCost"))(function (v7) {
+                                      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("payCost"))(function (v8) {
+                                          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("addressId"))(function (v9) {
+                                              return Control_Bind.bind(Data_Either.bindEither)(Data_Functor.map(Data_Either.functorEither)(status)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("process")))(function (v10) {
+                                                  return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonString))(v)("payPass"))(function (v11) {
+                                                      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonString))(v)("payId"))(function (v12) {
+                                                          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonString))(v)("expressCompany"))(function (v13) {
+                                                              return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonString))(v)("expressId"))(function (v14) {
+                                                                  return Control_Bind.bind(Data_Either.bindEither)(Control_Bind.bindFlipped(Data_Either.bindEither)(Yzmall_Data_PreciseDateTime.fromString)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("createTime")))(function (v15) {
+                                                                      return Control_Bind.bind(Data_Either.bindEither)(parseTM(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("payTime")))(function (v16) {
+                                                                          return Control_Bind.bind(Data_Either.bindEither)(parseTM(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("deliverTime")))(function (v17) {
+                                                                              return Control_Bind.bind(Data_Either.bindEither)(parseTM(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("refundTime")))(function (v18) {
+                                                                                  return Control_Applicative.pure(Data_Either.applicativeEither)({
+                                                                                      id: v1,
+                                                                                      accountId: v2,
+                                                                                      commodityId: v3,
+                                                                                      tag: v4,
+                                                                                      amount: v5,
+                                                                                      commissionCost: v6,
+                                                                                      rebateCost: v7,
+                                                                                      payCost: v8,
+                                                                                      addressId: v9,
+                                                                                      process: v10,
+                                                                                      payPass: v11,
+                                                                                      payId: v12,
+                                                                                      expressCompany: v13,
+                                                                                      expressId: v14,
+                                                                                      createTime: v15,
+                                                                                      payTime: v16,
+                                                                                      deliverTime: v17,
+                                                                                      refundTime: v18
+                                                                                  });
+                                                                              });
+                                                                          });
+                                                                      });
+                                                                  });
+                                                              });
+                                                          });
+                                                      });
+                                                  });
+                                              });
+                                          });
+                                      });
+                                  });
+                              });
+                          });
+                      });
+                  });
+              });
+          });
+      });
+  };
+  var decodePayForOrderResult = function (json) {
+      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Class.decodeJson(Data_Argonaut_Decode_Class.decodeForeignObject(Data_Argonaut_Decode_Class.decodeJsonJson))(json))(function (v) {
+          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonBoolean)(v)("expectVcode"))(function (v1) {
+              return Control_Bind.bind(Data_Either.bindEither)(Control_Bind.bindFlipped(Data_Either.bindEither)(decodeCommodityOrder)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonJson)(v)("order")))(function (v2) {
+                  return Control_Applicative.pure(Data_Either.applicativeEither)({
+                      expectVcode: v1,
+                      order: v2
+                  });
+              });
+          });
+      });
+  };
+  var decodeArrayCommodityOrder = Control_Bind.composeKleisliFlipped(Data_Either.bindEither)(function ($59) {
+      return Data_Traversable.sequence(Data_Traversable.traversableArray)(Data_Either.applicativeEither)(Data_Functor.map(Data_Functor.functorArray)(decodeCommodityOrder)($59));
+  })(Data_Argonaut_Decode_Class.decodeJArray);
+  exports["WaitForPayment"] = WaitForPayment;
+  exports["WaitForPaymentResult"] = WaitForPaymentResult;
+  exports["WaitForDeliver"] = WaitForDeliver;
+  exports["Delivered"] = Delivered;
+  exports["WaitForRefund"] = WaitForRefund;
+  exports["Refunded"] = Refunded;
+  exports["status"] = status;
+  exports["decodeArrayCommodityOrder"] = decodeArrayCommodityOrder;
+  exports["decodeCommodityOrder"] = decodeCommodityOrder;
+  exports["parseTM"] = parseTM;
+  exports["decodePayForOrderResult"] = decodePayForOrderResult;
+  exports["eqOrderStatus"] = eqOrderStatus;
+  exports["showOrderStatus"] = showOrderStatus;
+})(PS["Yzmalal.Data.CommodityOrder"] = PS["Yzmalal.Data.CommodityOrder"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Control_Applicative = PS["Control.Applicative"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Semigroupoid = PS["Control.Semigroupoid"];
+  var Data_Argonaut_Core = PS["Data.Argonaut.Core"];
+  var Data_Argonaut_Decode = PS["Data.Argonaut.Decode"];
+  var Data_Argonaut_Decode_Class = PS["Data.Argonaut.Decode.Class"];
+  var Data_Argonaut_Decode_Combinators = PS["Data.Argonaut.Decode.Combinators"];
+  var Data_Either = PS["Data.Either"];
+  var Data_Functor = PS["Data.Functor"];
+  var Data_Traversable = PS["Data.Traversable"];
+  var Prelude = PS["Prelude"];                 
+  var decodeAddress = function (json) {
+      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Class.decodeJson(Data_Argonaut_Decode_Class.decodeForeignObject(Data_Argonaut_Decode_Class.decodeJsonJson))(json))(function (v) {
+          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("id"))(function (v1) {
+              return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("accountId"))(function (v2) {
+                  return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("name"))(function (v3) {
+                      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("address"))(function (v4) {
+                          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("phone"))(function (v5) {
+                              return Control_Applicative.pure(Data_Either.applicativeEither)({
+                                  id: v1,
+                                  accountId: v2,
+                                  name: v3,
+                                  address: v4,
+                                  phone: v5
+                              });
+                          });
+                      });
+                  });
+              });
+          });
+      });
+  };
+  var decodeArrayAddress = Control_Bind.composeKleisliFlipped(Data_Either.bindEither)(function ($12) {
+      return Data_Traversable.sequence(Data_Traversable.traversableArray)(Data_Either.applicativeEither)(Data_Functor.map(Data_Functor.functorArray)(decodeAddress)($12));
+  })(Data_Argonaut_Decode_Class.decodeJArray);
+  exports["decodeAddress"] = decodeAddress;
+  exports["decodeArrayAddress"] = decodeArrayAddress;
+})(PS["Yzmall.Data.Address"] = PS["Yzmall.Data.Address"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
   var Control_Monad_Trans_Class = PS["Control.Monad.Trans.Class"];
   var Control_Semigroupoid = PS["Control.Semigroupoid"];
+  var Data_Maybe = PS["Data.Maybe"];
   var Halogen = PS["Halogen"];
   var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
   var Prelude = PS["Prelude"];
-  var Yzmall_Data_Route = PS["Yzmall.Data.Route"];                 
-  var Navigate = function (Monad0, logout, navigate) {
+  var Slug = PS["Slug"];
+  var Yzmall_Data_Address = PS["Yzmall.Data.Address"];                 
+  var ManageAddress = function (Monad0, addAddress, deleteAddress, getAddress, myAddresses) {
       this.Monad0 = Monad0;
-      this.logout = logout;
-      this.navigate = navigate;
+      this.addAddress = addAddress;
+      this.deleteAddress = deleteAddress;
+      this.getAddress = getAddress;
+      this.myAddresses = myAddresses;
   };
-  var navigate = function (dict) {
-      return dict.navigate;
+  var myAddresses = function (dict) {
+      return dict.myAddresses;
   };
-  var logout = function (dict) {
-      return dict.logout;
+  var getAddress = function (dict) {
+      return dict.getAddress;
   };
-  exports["logout"] = logout;
-  exports["navigate"] = navigate;
-  exports["Navigate"] = Navigate;
-})(PS["Yzmall.Capability.Navigate"] = PS["Yzmall.Capability.Navigate"] || {});
+  var deleteAddress = function (dict) {
+      return dict.deleteAddress;
+  };
+  var addAddress = function (dict) {
+      return dict.addAddress;
+  };
+  var manageAddressHalogenM = function (dictManageAddress) {
+      return new ManageAddress(function () {
+          return Halogen_Query_HalogenM.monadHalogenM;
+      }, function ($1) {
+          return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageAddress.Monad0())(addAddress(dictManageAddress)($1));
+      }, function ($2) {
+          return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageAddress.Monad0())(deleteAddress(dictManageAddress)($2));
+      }, function ($3) {
+          return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageAddress.Monad0())(getAddress(dictManageAddress)($3));
+      }, Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageAddress.Monad0())(myAddresses(dictManageAddress)));
+  };
+  exports["addAddress"] = addAddress;
+  exports["deleteAddress"] = deleteAddress;
+  exports["getAddress"] = getAddress;
+  exports["myAddresses"] = myAddresses;
+  exports["ManageAddress"] = ManageAddress;
+  exports["manageAddressHalogenM"] = manageAddressHalogenM;
+})(PS["Yzmall.Api.Capablity.Resource.Address"] = PS["Yzmall.Api.Capablity.Resource.Address"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Control_Applicative = PS["Control.Applicative"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Semigroupoid = PS["Control.Semigroupoid"];
+  var Data_Argonaut_Core = PS["Data.Argonaut.Core"];
+  var Data_Argonaut_Decode = PS["Data.Argonaut.Decode"];
+  var Data_Argonaut_Decode_Class = PS["Data.Argonaut.Decode.Class"];
+  var Data_Argonaut_Decode_Combinators = PS["Data.Argonaut.Decode.Combinators"];
+  var Data_Either = PS["Data.Either"];
+  var Data_Functor = PS["Data.Functor"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Data_Traversable = PS["Data.Traversable"];
+  var Prelude = PS["Prelude"];                 
+  var decodeBankCard = function (json) {
+      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Class.decodeJson(Data_Argonaut_Decode_Class.decodeForeignObject(Data_Argonaut_Decode_Class.decodeJsonJson))(json))(function (v) {
+          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("id"))(function (v1) {
+              return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("accountId"))(function (v2) {
+                  return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("name"))(function (v3) {
+                      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("cardId"))(function (v4) {
+                          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("region"))(function (v5) {
+                              return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("phone"))(function (v6) {
+                                  return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("bank"))(function (v7) {
+                                      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonString))(v)("huijuSignId"))(function (v8) {
+                                          return Control_Applicative.pure(Data_Either.applicativeEither)({
+                                              id: v1,
+                                              accountId: v2,
+                                              name: v3,
+                                              cardId: v4,
+                                              region: v5,
+                                              phone: v6,
+                                              bank: v7,
+                                              huijuSignId: v8
+                                          });
+                                      });
+                                  });
+                              });
+                          });
+                      });
+                  });
+              });
+          });
+      });
+  };
+  var decodeArrayBankCard = Control_Bind.composeKleisliFlipped(Data_Either.bindEither)(function ($18) {
+      return Data_Traversable.sequence(Data_Traversable.traversableArray)(Data_Either.applicativeEither)(Data_Functor.map(Data_Functor.functorArray)(decodeBankCard)($18));
+  })(Data_Argonaut_Decode_Class.decodeJArray);
+  exports["decodeBankCard"] = decodeBankCard;
+  exports["decodeArrayBankCard"] = decodeArrayBankCard;
+})(PS["Yzmall.Data.BankCard"] = PS["Yzmall.Data.BankCard"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Control_Monad_Trans_Class = PS["Control.Monad.Trans.Class"];
+  var Control_Semigroupoid = PS["Control.Semigroupoid"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Halogen = PS["Halogen"];
+  var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
+  var Prelude = PS["Prelude"];
+  var Slug = PS["Slug"];
+  var Yzmall_Data_BankCard = PS["Yzmall.Data.BankCard"];                 
+  var ManageBankCard = function (Monad0, addBankCard, deleteBankCard, getBankCard, myBankCards) {
+      this.Monad0 = Monad0;
+      this.addBankCard = addBankCard;
+      this.deleteBankCard = deleteBankCard;
+      this.getBankCard = getBankCard;
+      this.myBankCards = myBankCards;
+  };
+  var myBankCards = function (dict) {
+      return dict.myBankCards;
+  };
+  var getBankCard = function (dict) {
+      return dict.getBankCard;
+  };
+  var deleteBankCard = function (dict) {
+      return dict.deleteBankCard;
+  };
+  var addBankCard = function (dict) {
+      return dict.addBankCard;
+  };
+  var manageBankCardHalogenM = function (dictManageBankCard) {
+      return new ManageBankCard(function () {
+          return Halogen_Query_HalogenM.monadHalogenM;
+      }, function ($1) {
+          return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageBankCard.Monad0())(addBankCard(dictManageBankCard)($1));
+      }, function ($2) {
+          return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageBankCard.Monad0())(deleteBankCard(dictManageBankCard)($2));
+      }, function ($3) {
+          return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageBankCard.Monad0())(getBankCard(dictManageBankCard)($3));
+      }, Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageBankCard.Monad0())(myBankCards(dictManageBankCard)));
+  };
+  exports["addBankCard"] = addBankCard;
+  exports["deleteBankCard"] = deleteBankCard;
+  exports["getBankCard"] = getBankCard;
+  exports["myBankCards"] = myBankCards;
+  exports["ManageBankCard"] = ManageBankCard;
+  exports["manageBankCardHalogenM"] = manageBankCardHalogenM;
+})(PS["Yzmall.Api.Capablity.Resource.BankCard"] = PS["Yzmall.Api.Capablity.Resource.BankCard"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Control_Applicative = PS["Control.Applicative"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Semigroupoid = PS["Control.Semigroupoid"];
+  var Data_Argonaut_Core = PS["Data.Argonaut.Core"];
+  var Data_Argonaut_Decode = PS["Data.Argonaut.Decode"];
+  var Data_Argonaut_Decode_Class = PS["Data.Argonaut.Decode.Class"];
+  var Data_Argonaut_Decode_Combinators = PS["Data.Argonaut.Decode.Combinators"];
+  var Data_Either = PS["Data.Either"];
+  var Data_Function = PS["Data.Function"];
+  var Data_Functor = PS["Data.Functor"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Data_Show = PS["Data.Show"];
+  var Data_Traversable = PS["Data.Traversable"];
+  var Prelude = PS["Prelude"];
+  var Yzmall_Data_PreciseDateTime = PS["Yzmall.Data.PreciseDateTime"];                 
+  var WAIT_FOR_REVIEW = (function () {
+      function WAIT_FOR_REVIEW() {
+
+      };
+      WAIT_FOR_REVIEW.value = new WAIT_FOR_REVIEW();
+      return WAIT_FOR_REVIEW;
+  })();
+  var WAIT_FOR_PAYMENT_RESULT = (function () {
+      function WAIT_FOR_PAYMENT_RESULT() {
+
+      };
+      WAIT_FOR_PAYMENT_RESULT.value = new WAIT_FOR_PAYMENT_RESULT();
+      return WAIT_FOR_PAYMENT_RESULT;
+  })();
+  var SOLD = (function () {
+      function SOLD() {
+
+      };
+      SOLD.value = new SOLD();
+      return SOLD;
+  })();
+  var REJECT = (function () {
+      function REJECT() {
+
+      };
+      REJECT.value = new REJECT();
+      return REJECT;
+  })();
+  var COMMISSION = (function () {
+      function COMMISSION() {
+
+      };
+      COMMISSION.value = new COMMISSION();
+      return COMMISSION;
+  })();
+  var REBATE = (function () {
+      function REBATE() {
+
+      };
+      REBATE.value = new REBATE();
+      return REBATE;
+  })();
+  var showACTSellProcess = new Data_Show.Show(function (v) {
+      if (v instanceof WAIT_FOR_REVIEW) {
+          return "\u5f85\u5ba1\u6838";
+      };
+      if (v instanceof WAIT_FOR_PAYMENT_RESULT) {
+          return "\u7b49\u5f85\u652f\u4ed8\u7ed3\u679c";
+      };
+      if (v instanceof SOLD) {
+          return "\u5df2\u552e\u51fa";
+      };
+      if (v instanceof REJECT) {
+          return "\u5df2\u62d2\u7edd";
+      };
+      throw new Error("Failed pattern match at Yzmall.Data.ACTSell line 23, column 1 - line 23, column 51: " + [ v.constructor.name ]);
+  });
+  var process_ = function (v) {
+      if (v === "WAIT_FOR_REVIEW") {
+          return WAIT_FOR_REVIEW.value;
+      };
+      if (v === "WAIT_FOR_PAYMENT_RESULT") {
+          return WAIT_FOR_PAYMENT_RESULT.value;
+      };
+      if (v === "SOLD") {
+          return SOLD.value;
+      };
+      return REJECT.value;
+  };
+  var parseTM = function (v) {
+      if (v instanceof Data_Either.Left) {
+          return new Data_Either.Right(Data_Maybe.Nothing.value);
+      };
+      if (v instanceof Data_Either.Right) {
+          var r = Yzmall_Data_PreciseDateTime.fromString(v.value0);
+          if (r instanceof Data_Either.Left) {
+              return new Data_Either.Right(Data_Maybe.Nothing.value);
+          };
+          if (r instanceof Data_Either.Right) {
+              return Data_Either.Right.create(new Data_Maybe.Just(r.value0));
+          };
+          throw new Error("Failed pattern match at Yzmall.Data.ACTSell line 98, column 3 - line 100, column 30: " + [ r.constructor.name ]);
+      };
+      throw new Error("Failed pattern match at Yzmall.Data.ACTSell line 93, column 1 - line 93, column 73: " + [ v.constructor.name ]);
+  };                                                                                                   
+  var decodeMytSharedRecord = function (json) {
+      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Class.decodeJson(Data_Argonaut_Decode_Class.decodeForeignObject(Data_Argonaut_Decode_Class.decodeJsonJson))(json))(function (v) {
+          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("price"))(function (v1) {
+              return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("remainPurchase"))(function (v2) {
+                  return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("currentPeriod"))(function (v3) {
+                      return Control_Applicative.pure(Data_Either.applicativeEither)({
+                          remainPurchase: v2,
+                          price: v1,
+                          currentPeriod: v3
+                      });
+                  });
+              });
+          });
+      });
+  };
+  var category_ = function (v) {
+      if (v === "COMMISSION") {
+          return COMMISSION.value;
+      };
+      return REBATE.value;
+  };
+  var decodeACTSell = function (json) {
+      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Class.decodeJson(Data_Argonaut_Decode_Class.decodeForeignObject(Data_Argonaut_Decode_Class.decodeJsonJson))(json))(function (v) {
+          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("id"))(function (v1) {
+              return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("accountId"))(function (v2) {
+                  return Control_Bind.bind(Data_Either.bindEither)(Data_Functor.map(Data_Either.functorEither)(category_)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("category")))(function (v3) {
+                      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonNumber)(v)("price"))(function (v4) {
+                          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("amount"))(function (v5) {
+                              return Control_Bind.bind(Data_Either.bindEither)(Data_Functor.map(Data_Either.functorEither)(process_)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("process")))(function (v6) {
+                                  return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonNumber))(v)("payPass"))(function (v7) {
+                                      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonString))(v)("payId"))(function (v8) {
+                                          return Control_Bind.bind(Data_Either.bindEither)(Control_Bind.bindFlipped(Data_Either.bindEither)(Yzmall_Data_PreciseDateTime.fromString)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("createTime")))(function (v9) {
+                                              return Control_Bind.bind(Data_Either.bindEither)(parseTM(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("soldTime")))(function (v10) {
+                                                  return Control_Bind.bind(Data_Either.bindEither)(parseTM(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("rejectTime")))(function (v11) {
+                                                      return Control_Applicative.pure(Data_Either.applicativeEither)({
+                                                          id: v1,
+                                                          accountId: v2,
+                                                          category: v3,
+                                                          price: v4,
+                                                          amount: v5,
+                                                          process: v6,
+                                                          payPass: v7,
+                                                          payId: v8,
+                                                          createTime: v9,
+                                                          soldTime: v10,
+                                                          rejectTime: v11
+                                                      });
+                                                  });
+                                              });
+                                          });
+                                      });
+                                  });
+                              });
+                          });
+                      });
+                  });
+              });
+          });
+      });
+  };
+  var decodeArrayACTSell = Control_Bind.composeKleisliFlipped(Data_Either.bindEither)(function ($45) {
+      return Data_Traversable.sequence(Data_Traversable.traversableArray)(Data_Either.applicativeEither)(Data_Functor.map(Data_Functor.functorArray)(decodeACTSell)($45));
+  })(Data_Argonaut_Decode_Class.decodeJArray);
+  exports["COMMISSION"] = COMMISSION;
+  exports["REBATE"] = REBATE;
+  exports["WAIT_FOR_REVIEW"] = WAIT_FOR_REVIEW;
+  exports["WAIT_FOR_PAYMENT_RESULT"] = WAIT_FOR_PAYMENT_RESULT;
+  exports["SOLD"] = SOLD;
+  exports["REJECT"] = REJECT;
+  exports["decodeArrayACTSell"] = decodeArrayACTSell;
+  exports["decodeACTSell"] = decodeACTSell;
+  exports["category_"] = category_;
+  exports["process_"] = process_;
+  exports["decodeMytSharedRecord"] = decodeMytSharedRecord;
+  exports["parseTM"] = parseTM;
+  exports["showACTSellProcess"] = showACTSellProcess;
+})(PS["Yzmall.Data.ACTSell"] = PS["Yzmall.Data.ACTSell"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Control_Monad_Trans_Class = PS["Control.Monad.Trans.Class"];
+  var Control_Semigroupoid = PS["Control.Semigroupoid"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Halogen = PS["Halogen"];
+  var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
+  var Prelude = PS["Prelude"];
+  var Slug = PS["Slug"];
+  var Yzmalal_Data_CommodityOrder = PS["Yzmalal.Data.CommodityOrder"];
+  var Yzmall_Data_ACTSell = PS["Yzmall.Data.ACTSell"];                 
+  var ManageOrder = function (Monad0, createACTSellCommission, createACTSellRebate, createMYTSellRush, createOrder, createOrderSpecial, deleteOrder, getACTSells, mytSharedRecord, payForOrder, payForOrderSpecial, viewOrder) {
+      this.Monad0 = Monad0;
+      this.createACTSellCommission = createACTSellCommission;
+      this.createACTSellRebate = createACTSellRebate;
+      this.createMYTSellRush = createMYTSellRush;
+      this.createOrder = createOrder;
+      this.createOrderSpecial = createOrderSpecial;
+      this.deleteOrder = deleteOrder;
+      this.getACTSells = getACTSells;
+      this.mytSharedRecord = mytSharedRecord;
+      this.payForOrder = payForOrder;
+      this.payForOrderSpecial = payForOrderSpecial;
+      this.viewOrder = viewOrder;
+  };
+  var viewOrder = function (dict) {
+      return dict.viewOrder;
+  };
+  var payForOrderSpecial = function (dict) {
+      return dict.payForOrderSpecial;
+  };
+  var payForOrder = function (dict) {
+      return dict.payForOrder;
+  };
+  var mytSharedRecord = function (dict) {
+      return dict.mytSharedRecord;
+  };
+  var getACTSells = function (dict) {
+      return dict.getACTSells;
+  };
+  var deleteOrder = function (dict) {
+      return dict.deleteOrder;
+  };
+  var createOrderSpecial = function (dict) {
+      return dict.createOrderSpecial;
+  };
+  var createOrder = function (dict) {
+      return dict.createOrder;
+  };
+  var createMYTSellRush = function (dict) {
+      return dict.createMYTSellRush;
+  };
+  var createACTSellRebate = function (dict) {
+      return dict.createACTSellRebate;
+  };
+  var createACTSellCommission = function (dict) {
+      return dict.createACTSellCommission;
+  };
+  var manageOrderHalogenM = function (dictManageOrder) {
+      return new ManageOrder(function () {
+          return Halogen_Query_HalogenM.monadHalogenM;
+      }, function ($1) {
+          return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageOrder.Monad0())(createACTSellCommission(dictManageOrder)($1));
+      }, function ($2) {
+          return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageOrder.Monad0())(createACTSellRebate(dictManageOrder)($2));
+      }, Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageOrder.Monad0())(createMYTSellRush(dictManageOrder)), function (slug) {
+          return function ($3) {
+              return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageOrder.Monad0())(createOrder(dictManageOrder)(slug)($3));
+          };
+      }, function (slug) {
+          return function ($4) {
+              return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageOrder.Monad0())(createOrderSpecial(dictManageOrder)(slug)($4));
+          };
+      }, function ($5) {
+          return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageOrder.Monad0())(deleteOrder(dictManageOrder)($5));
+      }, Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageOrder.Monad0())(getACTSells(dictManageOrder)), Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageOrder.Monad0())(mytSharedRecord(dictManageOrder)), function (s) {
+          return function ($6) {
+              return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageOrder.Monad0())(payForOrder(dictManageOrder)(s)($6));
+          };
+      }, function (s) {
+          return function ($7) {
+              return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageOrder.Monad0())(payForOrderSpecial(dictManageOrder)(s)($7));
+          };
+      }, Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageOrder.Monad0())(viewOrder(dictManageOrder)));
+  };
+  exports["createACTSellCommission"] = createACTSellCommission;
+  exports["createACTSellRebate"] = createACTSellRebate;
+  exports["createMYTSellRush"] = createMYTSellRush;
+  exports["createOrder"] = createOrder;
+  exports["createOrderSpecial"] = createOrderSpecial;
+  exports["deleteOrder"] = deleteOrder;
+  exports["getACTSells"] = getACTSells;
+  exports["mytSharedRecord"] = mytSharedRecord;
+  exports["payForOrder"] = payForOrder;
+  exports["payForOrderSpecial"] = payForOrderSpecial;
+  exports["viewOrder"] = viewOrder;
+  exports["ManageOrder"] = ManageOrder;
+  exports["manageOrderHalogenM"] = manageOrderHalogenM;
+})(PS["Yzmall.Api.Capablity.Resource.CommodityOrder"] = PS["Yzmall.Api.Capablity.Resource.CommodityOrder"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Control_Applicative = PS["Control.Applicative"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Semigroupoid = PS["Control.Semigroupoid"];
+  var Data_Argonaut_Core = PS["Data.Argonaut.Core"];
+  var Data_Argonaut_Decode = PS["Data.Argonaut.Decode"];
+  var Data_Argonaut_Decode_Class = PS["Data.Argonaut.Decode.Class"];
+  var Data_Argonaut_Decode_Combinators = PS["Data.Argonaut.Decode.Combinators"];
+  var Data_Either = PS["Data.Either"];
+  var Data_Function = PS["Data.Function"];
+  var Data_Functor = PS["Data.Functor"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Data_Traversable = PS["Data.Traversable"];
+  var Prelude = PS["Prelude"];
+  var Yzmall_Data_PreciseDateTime = PS["Yzmall.Data.PreciseDateTime"];                 
+  var parseTM = function (v) {
+      if (v instanceof Data_Either.Left) {
+          return new Data_Either.Right(Data_Maybe.Nothing.value);
+      };
+      if (v instanceof Data_Either.Right) {
+          var r = Yzmall_Data_PreciseDateTime.fromString(v.value0);
+          if (r instanceof Data_Either.Left) {
+              return new Data_Either.Right(Data_Maybe.Nothing.value);
+          };
+          if (r instanceof Data_Either.Right) {
+              return Data_Either.Right.create(new Data_Maybe.Just(r.value0));
+          };
+          throw new Error("Failed pattern match at Yzmall.Data.Commission line 54, column 3 - line 56, column 30: " + [ r.constructor.name ]);
+      };
+      throw new Error("Failed pattern match at Yzmall.Data.Commission line 49, column 1 - line 49, column 73: " + [ v.constructor.name ]);
+  };
+  var decodeCommission = function (json) {
+      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Class.decodeJson(Data_Argonaut_Decode_Class.decodeForeignObject(Data_Argonaut_Decode_Class.decodeJsonJson))(json))(function (v) {
+          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("id"))(function (v1) {
+              return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("accountId"))(function (v2) {
+                  return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("commodityId"))(function (v3) {
+                      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonInt))(v)("tag"))(function (v4) {
+                          return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonInt)(v)("amount"))(function (v5) {
+                              return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("process"))(function (v6) {
+                                  return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonString))(v)("expressCompany"))(function (v7) {
+                                      return Control_Bind.bind(Data_Either.bindEither)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonMaybe(Data_Argonaut_Decode_Class.decodeJsonString))(v)("expressId"))(function (v8) {
+                                          return Control_Bind.bind(Data_Either.bindEither)(Control_Bind.bindFlipped(Data_Either.bindEither)(Yzmall_Data_PreciseDateTime.fromString)(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("createTime")))(function (v9) {
+                                              return Control_Bind.bind(Data_Either.bindEither)(parseTM(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("soldTime")))(function (v10) {
+                                                  return Control_Bind.bind(Data_Either.bindEither)(parseTM(Data_Argonaut_Decode_Combinators.getField(Data_Argonaut_Decode_Class.decodeJsonString)(v)("deliverTime")))(function (v11) {
+                                                      return Control_Applicative.pure(Data_Either.applicativeEither)({
+                                                          id: v1,
+                                                          accountId: v2,
+                                                          commodityId: v3,
+                                                          tag: v4,
+                                                          amount: v5,
+                                                          process: v6,
+                                                          expressCompany: v7,
+                                                          expressId: v8,
+                                                          createTime: v9,
+                                                          soldTime: v10,
+                                                          deliverTime: v11
+                                                      });
+                                                  });
+                                              });
+                                          });
+                                      });
+                                  });
+                              });
+                          });
+                      });
+                  });
+              });
+          });
+      });
+  };
+  var decodeArrayCommission = Control_Bind.composeKleisliFlipped(Data_Either.bindEither)(function ($31) {
+      return Data_Traversable.sequence(Data_Traversable.traversableArray)(Data_Either.applicativeEither)(Data_Functor.map(Data_Functor.functorArray)(decodeCommission)($31));
+  })(Data_Argonaut_Decode_Class.decodeJArray);
+  exports["decodeCommission"] = decodeCommission;
+  exports["decodeArrayCommission"] = decodeArrayCommission;
+  exports["parseTM"] = parseTM;
+})(PS["Yzmall.Data.Commission"] = PS["Yzmall.Data.Commission"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
   "use strict";
@@ -32165,11 +34457,16 @@ var PS = {};
   var Prelude = PS["Prelude"];
   var Slug = PS["Slug"];
   var Yzmall_Api_Endpoint = PS["Yzmall.Api.Endpoint"];
+  var Yzmall_Data_Commission = PS["Yzmall.Data.Commission"];
   var Yzmall_Data_Commodity = PS["Yzmall.Data.Commodity"];                 
-  var ManageCommodity = function (Monad0, getCommodities, getCommodity) {
+  var ManageCommodity = function (Monad0, getCommodities, getCommodity, viewCommissions) {
       this.Monad0 = Monad0;
       this.getCommodities = getCommodities;
       this.getCommodity = getCommodity;
+      this.viewCommissions = viewCommissions;
+  };
+  var viewCommissions = function (dict) {
+      return dict.viewCommissions;
   };
   var getCommodity = function (dict) {
       return dict.getCommodity;
@@ -32184,10 +34481,11 @@ var PS = {};
           return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageCommodity.Monad0())(getCommodities(dictManageCommodity)($1));
       }, function ($2) {
           return Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageCommodity.Monad0())(getCommodity(dictManageCommodity)($2));
-      });
+      }, Control_Monad_Trans_Class.lift(Halogen_Query_HalogenM.monadTransHalogenM)(dictManageCommodity.Monad0())(viewCommissions(dictManageCommodity)));
   };
   exports["getCommodities"] = getCommodities;
   exports["getCommodity"] = getCommodity;
+  exports["viewCommissions"] = viewCommissions;
   exports["ManageCommodity"] = ManageCommodity;
   exports["manageCommodityHalogenM"] = manageCommodityHalogenM;
 })(PS["Yzmall.Resource.Commodity"] = PS["Yzmall.Resource.Commodity"] || {});
@@ -32223,17 +34521,24 @@ var PS = {};
   var Routing_Duplex = PS["Routing.Duplex"];
   var Routing_Hash = PS["Routing.Hash"];
   var Type_Equality = PS["Type.Equality"];
+  var Yzmalal_Data_CommodityOrder = PS["Yzmalal.Data.CommodityOrder"];
   var Yzmall_Api_Capablity_Resource_Account = PS["Yzmall.Api.Capablity.Resource.Account"];
+  var Yzmall_Api_Capablity_Resource_Address = PS["Yzmall.Api.Capablity.Resource.Address"];
+  var Yzmall_Api_Capablity_Resource_BankCard = PS["Yzmall.Api.Capablity.Resource.BankCard"];
+  var Yzmall_Api_Capablity_Resource_CommodityOrder = PS["Yzmall.Api.Capablity.Resource.CommodityOrder"];
   var Yzmall_Api_Endpoint = PS["Yzmall.Api.Endpoint"];
   var Yzmall_Api_Request = PS["Yzmall.Api.Request"];
   var Yzmall_Api_Utils = PS["Yzmall.Api.Utils"];
   var Yzmall_Capability_LogMessages = PS["Yzmall.Capability.LogMessages"];
   var Yzmall_Capability_Navigate = PS["Yzmall.Capability.Navigate"];
   var Yzmall_Capability_Now = PS["Yzmall.Capability.Now"];
+  var Yzmall_Data_ACTSell = PS["Yzmall.Data.ACTSell"];
   var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
+  var Yzmall_Data_Address = PS["Yzmall.Data.Address"];
+  var Yzmall_Data_BankCard = PS["Yzmall.Data.BankCard"];
+  var Yzmall_Data_Commission = PS["Yzmall.Data.Commission"];
   var Yzmall_Data_Commodity = PS["Yzmall.Data.Commodity"];
   var Yzmall_Data_Log = PS["Yzmall.Data.Log"];
-  var Yzmall_Data_Phone = PS["Yzmall.Data.Phone"];
   var Yzmall_Data_Route = PS["Yzmall.Data.Route"];
   var Yzmall_Resource_Commodity = PS["Yzmall.Resource.Commodity"];                 
   var Dev = (function () {
@@ -32269,6 +34574,7 @@ var PS = {};
       return monadAppM;
   }, Effect_Class.liftEffect(monadEffectAppM)(Effect_Now.now), Effect_Class.liftEffect(monadEffectAppM)(Effect_Now.nowDate), Effect_Class.liftEffect(monadEffectAppM)(Effect_Now.nowDateTime), Effect_Class.liftEffect(monadEffectAppM)(Effect_Now.nowTime));
   var monadAffAppM = Effect_Aff_Class.monadAffReader(Effect_Aff_Class.monadAffAff);
+  var functorAppM = Control_Monad_Reader_Trans.functorReaderT(Effect_Aff.functorAff);
   var bindAppM = Control_Monad_Reader_Trans.bindReaderT(Effect_Aff.bindAff);
   var logMessagesAppM = new Yzmall_Capability_LogMessages.LogMessages(function () {
       return monadAppM;
@@ -32283,26 +34589,172 @@ var PS = {};
           })());
       });
   });
-  var manageAccountAppM = new Yzmall_Api_Capablity_Resource_Account.ManageAccount(function () {
+  var manageAddressAppM = new Yzmall_Api_Capablity_Resource_Address.ManageAddress(function () {
       return monadAppM;
-  }, Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
-      endpoint: Yzmall_Api_Endpoint.MyAccountInfo.value,
-      method: Yzmall_Api_Request.Get.value
-  }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_Account.decodeAccount)), function (loginFeilds) {
-      var method = Yzmall_Api_Request.Post.create(Data_Maybe.Just.create(Data_Argonaut_Encode_Class.encodeJson(Data_Argonaut_Encode_Class.encodeRecord(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeRecord(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonCons(Yzmall_Data_Phone.encodeJsonPhone)(Data_Argonaut_Encode_Class.gEncodeJsonNil)(new Data_Symbol.IsSymbol(function () {
-          return "phone";
-      }))())(new Data_Symbol.IsSymbol(function () {
-          return "password";
-      }))())())(Data_Argonaut_Encode_Class.gEncodeJsonNil)(new Data_Symbol.IsSymbol(function () {
-          return "loginFeilds";
-      }))())())({
-          loginFeilds: loginFeilds
-      })));
+  }, function (params) {
       return Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
-          endpoint: Yzmall_Api_Endpoint.Login.value,
-          method: method
-      }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_Account.decodeAccount));
-  });
+          endpoint: Yzmall_Api_Endpoint.AddAddress.value,
+          method: Yzmall_Api_Request.Post.create(Data_Maybe.Just.create(Data_Argonaut_Encode_Class.encodeJson(Data_Argonaut_Encode_Class.encodeRecord(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJBoolean)(Data_Argonaut_Encode_Class.gEncodeJsonNil)(new Data_Symbol.IsSymbol(function () {
+              return "setDefault";
+          }))())(new Data_Symbol.IsSymbol(function () {
+              return "phone";
+          }))())(new Data_Symbol.IsSymbol(function () {
+              return "name";
+          }))())(new Data_Symbol.IsSymbol(function () {
+              return "address";
+          }))())())(params)))
+      }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_Address.decodeAddress));
+  }, function (slug) {
+      return Data_Functor["void"](functorAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+          endpoint: new Yzmall_Api_Endpoint.DeleteAddress(slug),
+          method: new Yzmall_Api_Request.Post(Data_Maybe.Nothing.value)
+      }));
+  }, function (slug) {
+      return Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+          endpoint: new Yzmall_Api_Endpoint.GetAddress(slug),
+          method: Yzmall_Api_Request.Get.value
+      }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_Address.decodeAddress));
+  }, Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+      endpoint: Yzmall_Api_Endpoint.MyAddresses.value,
+      method: Yzmall_Api_Request.Get.value
+  }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_Address.decodeArrayAddress)));
+  var manageBankCardAppM = new Yzmall_Api_Capablity_Resource_BankCard.ManageBankCard(function () {
+      return monadAppM;
+  }, function (params) {
+      return Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+          endpoint: Yzmall_Api_Endpoint.AddBankCard.value,
+          method: Yzmall_Api_Request.Post.create(Data_Maybe.Just.create(Data_Argonaut_Encode_Class.encodeJson(Data_Argonaut_Encode_Class.encodeRecord(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJBoolean)(Data_Argonaut_Encode_Class.gEncodeJsonNil)(new Data_Symbol.IsSymbol(function () {
+              return "setDefault";
+          }))())(new Data_Symbol.IsSymbol(function () {
+              return "region";
+          }))())(new Data_Symbol.IsSymbol(function () {
+              return "phone";
+          }))())(new Data_Symbol.IsSymbol(function () {
+              return "name";
+          }))())(new Data_Symbol.IsSymbol(function () {
+              return "cardId";
+          }))())(new Data_Symbol.IsSymbol(function () {
+              return "bank";
+          }))())())(params)))
+      }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_BankCard.decodeBankCard));
+  }, function (slug) {
+      return Data_Functor["void"](functorAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+          endpoint: new Yzmall_Api_Endpoint.DeleteBankCard(slug),
+          method: new Yzmall_Api_Request.Post(Data_Maybe.Nothing.value)
+      }));
+  }, function (slug) {
+      return Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+          endpoint: new Yzmall_Api_Endpoint.GetBankCard(slug),
+          method: Yzmall_Api_Request.Get.value
+      }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_BankCard.decodeBankCard));
+  }, Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+      endpoint: Yzmall_Api_Endpoint.MyBankCards.value,
+      method: Yzmall_Api_Request.Get.value
+  }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_BankCard.decodeArrayBankCard)));
+  var manageOrderAppM = new Yzmall_Api_Capablity_Resource_CommodityOrder.ManageOrder(function () {
+      return monadAppM;
+  }, function (amount) {
+      return Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+          endpoint: Yzmall_Api_Endpoint.CreateACTSellCommission.value,
+          method: Yzmall_Api_Request.Post.create(Data_Maybe.Just.create(Data_Argonaut_Encode_Class.encodeJson(Data_Argonaut_Encode_Class.encodeRecord(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonNil)(new Data_Symbol.IsSymbol(function () {
+              return "amount";
+          }))())())({
+              amount: amount
+          })))
+      }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_ACTSell.decodeACTSell));
+  }, function (amount) {
+      return Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+          endpoint: Yzmall_Api_Endpoint.CreateACTSellRebate.value,
+          method: Yzmall_Api_Request.Post.create(Data_Maybe.Just.create(Data_Argonaut_Encode_Class.encodeJson(Data_Argonaut_Encode_Class.encodeRecord(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonNil)(new Data_Symbol.IsSymbol(function () {
+              return "amount";
+          }))())())({
+              amount: amount
+          })))
+      }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_ACTSell.decodeACTSell));
+  }, Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+      endpoint: Yzmall_Api_Endpoint.CreateACTSellRush.value,
+      method: new Yzmall_Api_Request.Post(Data_Maybe.Nothing.value)
+  }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_ACTSell.decodeACTSell)), function (slug) {
+      return function (params) {
+          return Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+              endpoint: new Yzmall_Api_Endpoint.CreateOrder(slug),
+              method: Yzmall_Api_Request.Post.create(Data_Maybe.Just.create(Data_Argonaut_Encode_Class.encodeJson(Data_Argonaut_Encode_Class.encodeRecord(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonMaybe(Data_Argonaut_Encode_Class.encodeJsonInt))(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonInt)(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonInt)(Data_Argonaut_Encode_Class.gEncodeJsonNil)(new Data_Symbol.IsSymbol(function () {
+                  return "tag";
+              }))())(new Data_Symbol.IsSymbol(function () {
+                  return "amount";
+              }))())(new Data_Symbol.IsSymbol(function () {
+                  return "addressId";
+              }))())())(params)))
+          }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmalal_Data_CommodityOrder.decodeCommodityOrder));
+      };
+  }, function (slug) {
+      return function (params) {
+          return Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+              endpoint: new Yzmall_Api_Endpoint.CreateOrderSpecial(slug),
+              method: Yzmall_Api_Request.Post.create(Data_Maybe.Just.create(Data_Argonaut_Encode_Class.encodeJson(Data_Argonaut_Encode_Class.encodeRecord(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonMaybe(Data_Argonaut_Encode_Class.encodeJsonInt))(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonInt)(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonInt)(Data_Argonaut_Encode_Class.gEncodeJsonNil)(new Data_Symbol.IsSymbol(function () {
+                  return "tag";
+              }))())(new Data_Symbol.IsSymbol(function () {
+                  return "amount";
+              }))())(new Data_Symbol.IsSymbol(function () {
+                  return "addressId";
+              }))())())(params)))
+          }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmalal_Data_CommodityOrder.decodeCommodityOrder));
+      };
+  }, function (slug) {
+      return Data_Functor["void"](functorAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+          endpoint: new Yzmall_Api_Endpoint.DeleteOrder(slug),
+          method: new Yzmall_Api_Request.Post(Data_Maybe.Nothing.value)
+      }));
+  }, Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+      endpoint: Yzmall_Api_Endpoint.MyACTSells.value,
+      method: Yzmall_Api_Request.Get.value
+  }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_ACTSell.decodeArrayACTSell)), Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+      endpoint: Yzmall_Api_Endpoint.ACTSharedRecord.value,
+      method: Yzmall_Api_Request.Get.value
+  }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_ACTSell.decodeMytSharedRecord)), function (slug) {
+      return function (vcode$prime) {
+          var mbObj = function (v) {
+              if (v instanceof Data_Maybe.Just) {
+                  return new Data_Maybe.Just({
+                      vcode: v.value0
+                  });
+              };
+              if (v instanceof Data_Maybe.Nothing) {
+                  return Data_Maybe.Nothing.value;
+              };
+              throw new Error("Failed pattern match at Yzmall.AppM line 208, column 7 - line 208, column 42: " + [ v.constructor.name ]);
+          };
+          return Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+              endpoint: new Yzmall_Api_Endpoint.PayForOrder(slug),
+              method: Yzmall_Api_Request.Post.create(Data_Functor.map(Data_Maybe.functorMaybe)(Data_Argonaut_Encode_Class.encodeJson(Data_Argonaut_Encode_Class.encodeRecord(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonNil)(new Data_Symbol.IsSymbol(function () {
+                  return "vcode";
+              }))())()))(mbObj(vcode$prime)))
+          }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmalal_Data_CommodityOrder.decodePayForOrderResult));
+      };
+  }, function (slug) {
+      return function (vcode$prime) {
+          var mbObj = function (v) {
+              if (v instanceof Data_Maybe.Just) {
+                  return new Data_Maybe.Just({
+                      vcode: v.value0
+                  });
+              };
+              if (v instanceof Data_Maybe.Nothing) {
+                  return Data_Maybe.Nothing.value;
+              };
+              throw new Error("Failed pattern match at Yzmall.AppM line 220, column 7 - line 220, column 42: " + [ v.constructor.name ]);
+          };
+          return Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+              endpoint: new Yzmall_Api_Endpoint.PayForOrderSpecial(slug),
+              method: Yzmall_Api_Request.Post.create(Data_Functor.map(Data_Maybe.functorMaybe)(Data_Argonaut_Encode_Class.encodeJson(Data_Argonaut_Encode_Class.encodeRecord(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonNil)(new Data_Symbol.IsSymbol(function () {
+                  return "vcode";
+              }))())()))(mbObj(vcode$prime)))
+          }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmalal_Data_CommodityOrder.decodePayForOrderResult));
+      };
+  }, Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+      endpoint: Yzmall_Api_Endpoint.ViewOrder.value,
+      method: Yzmall_Api_Request.Get.value
+  }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmalal_Data_CommodityOrder.decodeArrayCommodityOrder)));
   var managerCommodityAppM = new Yzmall_Resource_Commodity.ManageCommodity(function () {
       return monadAppM;
   }, function (params) {
@@ -32315,22 +34767,119 @@ var PS = {};
           endpoint: new Yzmall_Api_Endpoint.GetCommodity(slug),
           method: Yzmall_Api_Request.Get.value
       }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_Commodity.decodeCommodity));
-  });
+  }, Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+      endpoint: Yzmall_Api_Endpoint.ViewCommissions.value,
+      method: Yzmall_Api_Request.Get.value
+  }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_Commission.decodeArrayCommission)));
   var navigateAppM = new Yzmall_Capability_Navigate.Navigate(function () {
       return monadAppM;
-  }, Control_Bind.discard(Control_Bind.discardUnit)(bindAppM)(Control_Bind.bindFlipped(bindAppM)(function ($21) {
-      return Effect_Class.liftEffect(monadEffectAppM)(Effect_Ref.write(Data_Maybe.Nothing.value)($21));
+  }, Control_Bind.discard(Control_Bind.discardUnit)(bindAppM)(Control_Bind.bindFlipped(bindAppM)(function ($28) {
+      return Effect_Class.liftEffect(monadEffectAppM)(Effect_Ref.write(Data_Maybe.Nothing.value)($28));
   })(Control_Monad_Reader_Class.asks(monadAskAppM(Type_Equality.refl))(function (v) {
       return v.currentAccount;
   })))(function () {
-      return Yzmall_Capability_Navigate.navigate(navigateAppM)(Yzmall_Data_Route.Home.value);
-  }), function ($22) {
-      return Effect_Class.liftEffect(monadEffectAppM)(Routing_Hash.setHash(Routing_Duplex.print(Yzmall_Data_Route.routeCodec)($22)));
+      return Yzmall_Capability_Navigate.navigate(navigateAppM)(new Yzmall_Data_Route.RegularCommodity(Yzmall_Data_Route.LoginHome.value));
+  }), function ($29) {
+      return Effect_Class.liftEffect(monadEffectAppM)(Routing_Hash.setHash(Routing_Duplex.print(Yzmall_Data_Route.routeCodec)($29)));
+  });
+  var manageAccountAppM = new Yzmall_Api_Capablity_Resource_Account.ManageAccount(function () {
+      return monadAppM;
+  }, function (alipay) {
+      var method = Yzmall_Api_Request.Post.create(Data_Maybe.Just.create(Data_Argonaut_Encode_Class.encodeJson(Data_Argonaut_Encode_Class.encodeRecord(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonNil)(new Data_Symbol.IsSymbol(function () {
+          return "alipay";
+      }))())())({
+          alipay: alipay
+      })));
+      return Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+          endpoint: Yzmall_Api_Endpoint.BindAlipay.value,
+          method: method
+      }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_Account.decodeAccount));
+  }, function (params) {
+      var method = Yzmall_Api_Request.Post.create(Data_Maybe.Just.create(Data_Argonaut_Encode_Class.encodeJson(Data_Argonaut_Encode_Class.encodeRecord(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonNil)(new Data_Symbol.IsSymbol(function () {
+          return "vcode";
+      }))())(new Data_Symbol.IsSymbol(function () {
+          return "phone";
+      }))())(new Data_Symbol.IsSymbol(function () {
+          return "password";
+      }))())(new Data_Symbol.IsSymbol(function () {
+          return "nickname";
+      }))())(new Data_Symbol.IsSymbol(function () {
+          return "inviter";
+      }))())())(params)));
+      return Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+          endpoint: Yzmall_Api_Endpoint.CreateAccount.value,
+          method: method
+      }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_Account.decodeAccount));
+  }, function (phone) {
+      var method = Yzmall_Api_Request.Post.create(Data_Maybe.Just.create(Data_Argonaut_Encode_Class.encodeJson(Data_Argonaut_Encode_Class.encodeRecord(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonNil)(new Data_Symbol.IsSymbol(function () {
+          return "phone";
+      }))())())({
+          phone: phone
+      })));
+      return Data_Functor["void"](functorAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+          endpoint: Yzmall_Api_Endpoint.CreateVcode.value,
+          method: method
+      }));
+  }, Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+      endpoint: Yzmall_Api_Endpoint.MyAccountInfo.value,
+      method: Yzmall_Api_Request.Get.value
+  }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_Account.decodeAccount)), Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+      endpoint: Yzmall_Api_Endpoint.Invitees.value,
+      method: Yzmall_Api_Request.Get.value
+  }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_Account.decodeArrayAccount)), function (loginFeilds) {
+      var method = Yzmall_Api_Request.Post.create(Data_Maybe.Just.create(Data_Argonaut_Encode_Class.encodeJson(Data_Argonaut_Encode_Class.encodeRecord(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonNil)(new Data_Symbol.IsSymbol(function () {
+          return "phone";
+      }))())(new Data_Symbol.IsSymbol(function () {
+          return "password";
+      }))())())(loginFeilds)));
+      return Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+          endpoint: Yzmall_Api_Endpoint.Login.value,
+          method: method
+      }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_Account.decodeAccount));
+  }, Control_Bind.discard(Control_Bind.discardUnit)(bindAppM)(Data_Functor["void"](functorAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+      endpoint: Yzmall_Api_Endpoint.Logout.value,
+      method: new Yzmall_Api_Request.Post(Data_Maybe.Nothing.value)
+  })))(function () {
+      return Control_Bind.discard(Control_Bind.discardUnit)(bindAppM)(Control_Bind.bindFlipped(bindAppM)(function ($30) {
+          return Effect_Class.liftEffect(monadEffectAppM)(Effect_Ref.write(Data_Maybe.Nothing.value)($30));
+      })(Control_Monad_Reader_Class.asks(monadAskAppM(Type_Equality.refl))(function (v) {
+          return v.currentAccount;
+      })))(function () {
+          return Yzmall_Capability_Navigate.navigate(navigateAppM)(new Yzmall_Data_Route.RegularCommodity(Yzmall_Data_Route.NormalHome.value));
+      });
+  }), function (params) {
+      var method = Yzmall_Api_Request.Post.create(Data_Maybe.Just.create(Data_Argonaut_Encode_Class.encodeJson(Data_Argonaut_Encode_Class.encodeRecord(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonNil)(new Data_Symbol.IsSymbol(function () {
+          return "vcode";
+      }))())(new Data_Symbol.IsSymbol(function () {
+          return "phone";
+      }))())(new Data_Symbol.IsSymbol(function () {
+          return "password";
+      }))())())(params)));
+      return Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+          endpoint: Yzmall_Api_Endpoint.ResetPassword.value,
+          method: method
+      }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_Account.decodeAccount));
+  }, function (name) {
+      return function (idCard) {
+          var method = Yzmall_Api_Request.Post.create(Data_Maybe.Just.create(Data_Argonaut_Encode_Class.encodeJson(Data_Argonaut_Encode_Class.encodeRecord(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonNil)(new Data_Symbol.IsSymbol(function () {
+              return "name";
+          }))())(new Data_Symbol.IsSymbol(function () {
+              return "idCard";
+          }))())())({
+              name: name,
+              idCard: idCard
+          })));
+          return Control_Bind.bind(bindAppM)(Yzmall_Api_Utils.mkRequest(monadAffAppM)(monadAskAppM(Type_Equality.refl))({
+              endpoint: Yzmall_Api_Endpoint.SetName.value,
+              method: method
+          }))(Yzmall_Api_Utils.decode(logMessagesAppM)(nowAppM)(Yzmall_Data_Account.decodeAccount));
+      };
   });
   exports["Dev"] = Dev;
   exports["Prod"] = Prod;
   exports["AppM"] = AppM;
   exports["runAppM"] = runAppM;
+  exports["functorAppM"] = functorAppM;
   exports["bindAppM"] = bindAppM;
   exports["monadAppM"] = monadAppM;
   exports["monadEffectAppM"] = monadEffectAppM;
@@ -32341,6 +34890,9 @@ var PS = {};
   exports["navigateAppM"] = navigateAppM;
   exports["managerCommodityAppM"] = managerCommodityAppM;
   exports["manageAccountAppM"] = manageAccountAppM;
+  exports["manageAddressAppM"] = manageAddressAppM;
+  exports["manageBankCardAppM"] = manageBankCardAppM;
+  exports["manageOrderAppM"] = manageOrderAppM;
 })(PS["Yzmall.AppM"] = PS["Yzmall.AppM"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
@@ -32351,9 +34903,12 @@ var PS = {};
   var Control_Category = PS["Control.Category"];
   var Control_Monad = PS["Control.Monad"];
   var Control_Monad_Error_Class = PS["Control.Monad.Error.Class"];
+  var Data_Bifoldable = PS["Data.Bifoldable"];
   var Data_Bifunctor = PS["Data.Bifunctor"];
+  var Data_Bitraversable = PS["Data.Bitraversable"];
   var Data_Either = PS["Data.Either"];
   var Data_Eq = PS["Data.Eq"];
+  var Data_Foldable = PS["Data.Foldable"];
   var Data_Function = PS["Data.Function"];
   var Data_Functor = PS["Data.Functor"];
   var Data_Generic_Rep = PS["Data.Generic.Rep"];
@@ -32365,6 +34920,7 @@ var PS = {};
   var Data_Monoid = PS["Data.Monoid"];
   var Data_Semigroup = PS["Data.Semigroup"];
   var Data_Show = PS["Data.Show"];
+  var Data_Traversable = PS["Data.Traversable"];
   var Data_Unit = PS["Data.Unit"];                 
   var NotAsked = (function () {
       function NotAsked() {
@@ -32405,7 +34961,7 @@ var PS = {};
       if (v instanceof Data_Maybe.Just) {
           return new Success(v.value0);
       };
-      throw new Error("Failed pattern match at Network.RemoteData line 95, column 1 - line 95, column 51: " + [ v.constructor.name ]);
+      throw new Error("Failed pattern match at Network.RemoteData line 129, column 1 - line 129, column 51: " + [ v.constructor.name ]);
   }; 
   var _Success = function (dictChoice) {
       var unwrap = function (v) {
@@ -32426,47 +34982,16 @@ var PS = {};
 (function(exports) {
   // Generated by purs version 0.12.1
   "use strict";
-  var Data_Eq = PS["Data.Eq"];
-  var Data_Function = PS["Data.Function"];
-  var Data_Semigroup = PS["Data.Semigroup"];
-  var Halogen = PS["Halogen"];
-  var Halogen_HTML = PS["Halogen.HTML"];
-  var Halogen_HTML_Core = PS["Halogen.HTML.Core"];
-  var Halogen_HTML_Elements = PS["Halogen.HTML.Elements"];
-  var Halogen_HTML_Events = PS["Halogen.HTML.Events"];
-  var Halogen_HTML_Properties = PS["Halogen.HTML.Properties"];
-  var Halogen_Themes_Bootstrap4 = PS["Halogen.Themes.Bootstrap4"];
-  var Prelude = PS["Prelude"];
-  var Yzmall_Utils = PS["Yzmall.Utils"];                 
-  var yellowColor = "color: #F6C17F;";
-  var renderInputGroup = function (config) {
-      return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.inputGroup)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Halogen_Themes_Bootstrap4.mb2))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.inputGroupPrepend) ])([ Halogen_HTML_Elements.span([ Yzmall_Utils.attr_("id")(config.id + "-prepend"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.inputGroupText)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.justifyContentCenter))), Yzmall_Utils.style("width: 50px") ])([ Halogen_HTML_Elements.i([ Yzmall_Utils.attr_("class")(config.icon) ])([  ]) ]) ]), Halogen_HTML_Elements.input([ Yzmall_Utils.attr_("type")("text"), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formControl), Yzmall_Utils.attr_("id")("validation-" + config.id), Halogen_HTML_Properties.placeholder(config.placeholder), Yzmall_Utils.attr_("value")(""), Halogen_HTML_Properties.required(config.required) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.invalidFeedback) ])([ Halogen_HTML_Core.text("") ]) ]);
-  };
-  var pcOnly = Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dNone)("d-md-flex");
-  var mobileOnly = Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)("d-md-none");
-  var lightYellowColor = "color: #f8f2d8;";
-  var existWhenZero = function (n) {
-      return function (cn) {
-          var $0 = n === 0;
-          if ($0) {
-              return cn;
-          };
-          return "";
-      };
-  };
-  exports["renderInputGroup"] = renderInputGroup;
-  exports["pcOnly"] = pcOnly;
-  exports["mobileOnly"] = mobileOnly;
-  exports["yellowColor"] = yellowColor;
-  exports["lightYellowColor"] = lightYellowColor;
-  exports["existWhenZero"] = existWhenZero;
-})(PS["Yzmall.Page.Utils"] = PS["Yzmall.Page.Utils"] || {});
-(function(exports) {
-  // Generated by purs version 0.12.1
-  "use strict";
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Monad_Reader = PS["Control.Monad.Reader"];
+  var Control_Monad_Reader_Class = PS["Control.Monad.Reader.Class"];
   var Data_Function = PS["Data.Function"];
   var Data_Functor = PS["Data.Functor"];
+  var Data_Maybe = PS["Data.Maybe"];
   var Data_Semigroup = PS["Data.Semigroup"];
+  var Effect = PS["Effect"];
+  var Effect_Class = PS["Effect.Class"];
+  var Effect_Ref = PS["Effect.Ref"];
   var Halogen = PS["Halogen"];
   var Halogen_HTML = PS["Halogen.HTML"];
   var Halogen_HTML_Core = PS["Halogen.HTML.Core"];
@@ -32476,6 +35001,8 @@ var PS = {};
   var Halogen_Themes_Bootstrap4 = PS["Halogen.Themes.Bootstrap4"];
   var Prelude = PS["Prelude"];
   var $$String = PS["String"];
+  var Yzmall_Api_Capablity_Resource_Account = PS["Yzmall.Api.Capablity.Resource.Account"];
+  var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
   var Yzmall_Page_Utils = PS["Yzmall.Page.Utils"];
   var Yzmall_Utils = PS["Yzmall.Utils"];                 
   var registerFields = [ {
@@ -32512,7 +35039,7 @@ var PS = {};
   var renderRegisterModal = (function () {
       var footer = [ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.ml3)(Halogen_Themes_Bootstrap4.floatLeft))) ])([ Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text("\u5df2\u6709\u8d26\u53f7?\u73b0\u5728") ]), Halogen_HTML_Elements.a([ Halogen_HTML_Properties.href("#"), Yzmall_Utils.attr_("data-dismiss")("modal"), Yzmall_Utils.attr_("data-toggle")("modal"), Yzmall_Utils.attr_("data-target")("#loginModal") ])([ Halogen_HTML_Core.text("\u53bb\u767b\u5f55") ]) ]), Halogen_HTML_Elements.button([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w25)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mr3)(Halogen_Themes_Bootstrap4.mlAuto)))))), Yzmall_Utils.attr_("type")("button") ])([ Halogen_HTML_Core.text("\u4e0b\u4e00\u6b65") ]) ];
       var body = [ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.justifyContentCenter)(Halogen_Themes_Bootstrap4.alignItemsCenter))) ])([ Halogen_HTML_Elements.img([ Yzmall_Utils.style("max-height: 150px"), Halogen_HTML_Properties.src($$String.logo) ]) ]), Halogen_HTML_Elements.form_([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formGroup) ])(Data_Functor.map(Data_Functor.functorArray)(Yzmall_Page_Utils.renderInputGroup)(registerFields)) ]) ];
-      return Yzmall_Utils.renderModal("registerModal")("\u6ce8\u518c")(footer)(body);
+      return Yzmall_Utils.renderModal("registerModal")("\u6ce8\u518c")(footer)(body)(true);
   })();
   var loginFields = [ {
       id: "phone",
@@ -32528,7 +35055,7 @@ var PS = {};
   var renderLoginModal = (function () {
       var footer = [ Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.ml3)(Halogen_Themes_Bootstrap4.floatLeft)), Yzmall_Utils.attr_("data-toggle")("modal"), Yzmall_Utils.attr_("data-target")("#registerModal"), Yzmall_Utils.attr_("data-dismiss")("modal"), Halogen_HTML_Properties.href("#") ])([ Halogen_HTML_Core.text("\u7acb\u5373\u6ce8\u518c") ]), Halogen_HTML_Elements.button([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w25)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mr3)(Halogen_Themes_Bootstrap4.mlAuto)))))), Yzmall_Utils.attr_("type")("button") ])([ Halogen_HTML_Core.text("\u767b\u5f55") ]) ];
       var body = [ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.justifyContentCenter)(Halogen_Themes_Bootstrap4.alignItemsCenter))) ])([ Halogen_HTML_Elements.img([ Yzmall_Utils.style("max-height: 150px"), Halogen_HTML_Properties.src($$String.logo) ]) ]), Halogen_HTML_Elements.form_([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formGroup) ])(Data_Functor.map(Data_Functor.functorArray)(Yzmall_Page_Utils.renderInputGroup)(loginFields)) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.dFlex)) ])([ Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mr3)(Halogen_Themes_Bootstrap4.mlAuto)), Halogen_HTML_Properties.href("#") ])([ Halogen_HTML_Core.text("\u5fd8\u8bb0\u5bc6\u7801") ]) ]) ];
-      return Yzmall_Utils.renderModal("loginModal")("\u767b\u5f55")(footer)(body);
+      return Yzmall_Utils.renderModal("loginModal")("\u767b\u5f55")(footer)(body)(true);
   })();
   exports["registerFields"] = registerFields;
   exports["renderRegisterModal"] = renderRegisterModal;
@@ -32538,8 +35065,768 @@ var PS = {};
 (function(exports) {
   // Generated by purs version 0.12.1
   "use strict";
+  var Conduit_Component_Utils = PS["Conduit.Component.Utils"];
+  var Control_Applicative = PS["Control.Applicative"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Monad_Reader = PS["Control.Monad.Reader"];
+  var Control_Monad_Reader_Class = PS["Control.Monad.Reader.Class"];
+  var Control_Monad_State_Class = PS["Control.Monad.State.Class"];
+  var Data_Eq = PS["Data.Eq"];
   var Data_Function = PS["Data.Function"];
-  var Data_Functor = PS["Data.Functor"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Data_Semigroup = PS["Data.Semigroup"];
+  var Data_String = PS["Data.String"];
+  var Data_String_CodePoints = PS["Data.String.CodePoints"];
+  var Data_Unit = PS["Data.Unit"];
+  var Effect_Aff_Class = PS["Effect.Aff.Class"];
+  var Effect_Class = PS["Effect.Class"];
+  var Effect_Ref = PS["Effect.Ref"];
+  var Effect_Timer = PS["Effect.Timer"];
+  var Halogen = PS["Halogen"];
+  var Halogen_Aff = PS["Halogen.Aff"];
+  var Halogen_Component = PS["Halogen.Component"];
+  var Halogen_HTML = PS["Halogen.HTML"];
+  var Halogen_HTML_Core = PS["Halogen.HTML.Core"];
+  var Halogen_HTML_Elements = PS["Halogen.HTML.Elements"];
+  var Halogen_HTML_Events = PS["Halogen.HTML.Events"];
+  var Halogen_HTML_Properties = PS["Halogen.HTML.Properties"];
+  var Halogen_Query = PS["Halogen.Query"];
+  var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
+  var Halogen_Themes_Bootstrap4 = PS["Halogen.Themes.Bootstrap4"];
+  var Partial_Unsafe = PS["Partial.Unsafe"];
+  var Prelude = PS["Prelude"];
+  var $$String = PS["String"];
+  var Yzmall_Api_Capablity_Resource_Account = PS["Yzmall.Api.Capablity.Resource.Account"];
+  var Yzmall_Capability_Navigate = PS["Yzmall.Capability.Navigate"];
+  var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
+  var Yzmall_Data_Route = PS["Yzmall.Data.Route"];
+  var Yzmall_Data_Route2 = PS["Yzmall.Data.Route2"];
+  var Yzmall_Page_Part_Login = PS["Yzmall.Page.Part.Login"];
+  var Yzmall_Page_Utils = PS["Yzmall.Page.Utils"];
+  var Yzmall_Utils = PS["Yzmall.Utils"];                 
+  var Initialize = (function () {
+      function Initialize(value0) {
+          this.value0 = value0;
+      };
+      Initialize.create = function (value0) {
+          return new Initialize(value0);
+      };
+      return Initialize;
+  })();
+  var Reset = (function () {
+      function Reset(value0, value1) {
+          this.value0 = value0;
+          this.value1 = value1;
+      };
+      Reset.create = function (value0) {
+          return function (value1) {
+              return new Reset(value0, value1);
+          };
+      };
+      return Reset;
+  })();
+  var LoginAction = (function () {
+      function LoginAction(value0) {
+          this.value0 = value0;
+      };
+      LoginAction.create = function (value0) {
+          return new LoginAction(value0);
+      };
+      return LoginAction;
+  })();
+  var RegisterAction = (function () {
+      function RegisterAction(value0) {
+          this.value0 = value0;
+      };
+      RegisterAction.create = function (value0) {
+          return new RegisterAction(value0);
+      };
+      return RegisterAction;
+  })();
+  var GetVCode = (function () {
+      function GetVCode(value0) {
+          this.value0 = value0;
+      };
+      GetVCode.create = function (value0) {
+          return new GetVCode(value0);
+      };
+      return GetVCode;
+  })();
+  var GetVCode_Reset = (function () {
+      function GetVCode_Reset(value0) {
+          this.value0 = value0;
+      };
+      GetVCode_Reset.create = function (value0) {
+          return new GetVCode_Reset(value0);
+      };
+      return GetVCode_Reset;
+  })();
+  var ResetPassword = (function () {
+      function ResetPassword(value0) {
+          this.value0 = value0;
+      };
+      ResetPassword.create = function (value0) {
+          return new ResetPassword(value0);
+      };
+      return ResetPassword;
+  })();
+  var CheckPhoneNumber = (function () {
+      function CheckPhoneNumber(value0) {
+          this.value0 = value0;
+      };
+      CheckPhoneNumber.create = function (value0) {
+          return new CheckPhoneNumber(value0);
+      };
+      return CheckPhoneNumber;
+  })();
+  var CheckPhoneNumber2 = (function () {
+      function CheckPhoneNumber2(value0) {
+          this.value0 = value0;
+      };
+      CheckPhoneNumber2.create = function (value0) {
+          return new CheckPhoneNumber2(value0);
+      };
+      return CheckPhoneNumber2;
+  })();
+  var BindAliPay = (function () {
+      function BindAliPay(value0) {
+          this.value0 = value0;
+      };
+      BindAliPay.create = function (value0) {
+          return new BindAliPay(value0);
+      };
+      return BindAliPay;
+  })();
+  var First = (function () {
+      function First() {
+
+      };
+      First.value = new First();
+      return First;
+  })();
+  var Second = (function () {
+      function Second() {
+
+      };
+      Second.value = new Second();
+      return Second;
+  })();
+  var Third = (function () {
+      function Third() {
+
+      };
+      Third.value = new Third();
+      return Third;
+  })();
+  var Fourth = (function () {
+      function Fourth() {
+
+      };
+      Fourth.value = new Fourth();
+      return Fourth;
+  })();
+  var BtnAvailable = (function () {
+      function BtnAvailable() {
+
+      };
+      BtnAvailable.value = new BtnAvailable();
+      return BtnAvailable;
+  })();
+  var BtnDisable = (function () {
+      function BtnDisable() {
+
+      };
+      BtnDisable.value = new BtnDisable();
+      return BtnDisable;
+  })();
+  var BtnGrey = (function () {
+      function BtnGrey() {
+
+      };
+      BtnGrey.value = new BtnGrey();
+      return BtnGrey;
+  })();
+  var eqNavbarPage = new Data_Eq.Eq(function (x) {
+      return function (y) {
+          if (x instanceof First && y instanceof First) {
+              return true;
+          };
+          if (x instanceof Second && y instanceof Second) {
+              return true;
+          };
+          if (x instanceof Third && y instanceof Third) {
+              return true;
+          };
+          if (x instanceof Fourth && y instanceof Fourth) {
+              return true;
+          };
+          return false;
+      };
+  });
+  var renderNavBar = function (st) {
+      var renderNavItem = function (str) {
+          return function (n) {
+              return function (route) {
+                  return Halogen_HTML_Elements.li([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.navItem)((function () {
+                      var $64 = Data_Eq.eq(eqNavbarPage)(n)(st.page);
+                      if ($64) {
+                          return Halogen_Themes_Bootstrap4.active;
+                      };
+                      return "";
+                  })())) ])([ Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.navLink), Conduit_Component_Utils.safeHref(route) ])([ Halogen_HTML_Core.text(str) ]) ]);
+              };
+          };
+      };
+      var btns = [ Halogen_HTML_Elements.button([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnOutlineDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.my2)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mlAuto)("my-sm-0"))))), Yzmall_Utils.attr_("data-toggle")("modal"), Yzmall_Utils.attr_("data-target")("#loginModal") ])([ Halogen_HTML_Core.text("\u767b\u5f55") ]) ];
+      return Halogen_HTML_Elements.nav([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.navbar)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.navbarExpandMd)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.navbarDark)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.bgTransparent)("sticky-top"))))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Halogen_Themes_Bootstrap4.px0)) ])([ Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.navbarBrand)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.alignItemsCenter))), Conduit_Component_Utils.safeHref(new Yzmall_Data_Route.RegularCommodity(Yzmall_Data_Route.NormalHome.value)) ])([ Halogen_HTML_Elements.img([ Halogen_HTML_Properties.src($$String.logoNavbar), Yzmall_Utils.style("width: 131px; height: 29px") ]) ]), Halogen_HTML_Elements.button([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.navbarToggler), Yzmall_Utils.attr_("data-toggle")("collapse"), Yzmall_Utils.attr_("data-target")("#navbarNav"), Yzmall_Utils.attr_("type")("button") ])([ Halogen_HTML_Elements.span([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.navbarTogglerIcon) ])([  ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.collapse)(Halogen_Themes_Bootstrap4.navbarCollapse)), Yzmall_Utils.attr_("id")("navbarNav") ])(Data_Semigroup.append(Data_Semigroup.semigroupArray)([ Halogen_HTML_Elements.ul([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.navbarNav) ])([ renderNavItem("\u6b63\u4ef7\u5546\u54c1")(First.value)(new Yzmall_Data_Route.RegularCommodity(Yzmall_Data_Route.NormalHome.value)), renderNavItem("\u4ea4\u6613\u4e2d\u5fc3")(Third.value)(Yzmall_Data_Route.TradeCenter.value), renderNavItem("\u4e2a\u4eba\u4e2d\u5fc3")(Fourth.value)(new Yzmall_Data_Route.PC_ROUTER(Data_Maybe.Nothing.value)) ]) ])((function () {
+          var $65 = Data_Maybe.isJust(st.currentAccount);
+          if ($65) {
+              return [  ];
+          };
+          return btns;
+      })())) ]) ]);
+  };
+  var eqGetVcodeState = new Data_Eq.Eq(function (x) {
+      return function (y) {
+          if (x instanceof BtnAvailable && y instanceof BtnAvailable) {
+              return true;
+          };
+          if (x instanceof BtnDisable && y instanceof BtnDisable) {
+              return true;
+          };
+          if (x instanceof BtnGrey && y instanceof BtnGrey) {
+              return true;
+          };
+          return false;
+      };
+  });
+  var component = function (dictMonadAff) {
+      return function (dictMonadAsk) {
+          return function (dictNavigate) {
+              return function (dictManageAccount) {
+                  var render = function (v) {
+                      var r6$prime = {
+                          id: "password2-resetPassword",
+                          icon: "fa fa-unlock-alt",
+                          placeholder: "\u786e\u8ba4\u5bc6\u7801\uff086 ~ 16\u4f4d\uff09",
+                          required: true
+                      };
+                      var r6 = {
+                          id: "password2",
+                          icon: "fa fa-unlock-alt",
+                          placeholder: "\u786e\u8ba4\u5bc6\u7801\uff086 ~ 16\u4f4d\uff09",
+                          required: true
+                      };
+                      var r5$prime = {
+                          id: "password1-resetPassword",
+                          icon: "fa fa-unlock",
+                          placeholder: "\u8f93\u5165\u5bc6\u7801\uff086 ~ 16\u4f4d\uff09",
+                          required: true
+                      };
+                      var r5 = {
+                          id: "password1",
+                          icon: "fa fa-unlock",
+                          placeholder: "\u8f93\u5165\u5bc6\u7801\uff086 ~ 16\u4f4d\uff09",
+                          required: true
+                      };
+                      var r4$prime = {
+                          id: "vcode-resetPassword",
+                          icon: "fa fa-comments",
+                          placeholder: "\u8f93\u5165\u9a8c\u8bc1\u7801",
+                          required: true
+                      };
+                      var r4 = {
+                          id: "vcode",
+                          icon: "fa fa-comments",
+                          placeholder: "\u8f93\u5165\u9a8c\u8bc1\u7801",
+                          required: true
+                      };
+                      var r3$prime = {
+                          id: "phone-resetPassword",
+                          icon: "fa fa-mobile-alt",
+                          placeholder: "\u8f93\u5165\u624b\u673a\u53f7",
+                          required: true
+                      };
+                      var r3 = {
+                          id: "phone-register",
+                          icon: "fa fa-mobile-alt",
+                          placeholder: "\u8f93\u5165\u624b\u673a\u53f7",
+                          required: true
+                      };
+                      var r2 = {
+                          id: "nickname",
+                          icon: "fa fa-user-alt",
+                          placeholder: "\u8f93\u5165\u6635\u79f0",
+                          required: true
+                      };
+                      var r1 = {
+                          id: "inviter",
+                          icon: "fa fa-user-plus",
+                          placeholder: "\u8f93\u5165\u9080\u8bf7\u8005ID",
+                          required: false
+                      };
+                      var loginPhone = {
+                          id: "phone",
+                          icon: "fas fa-mobile-alt",
+                          placeholder: "\u8f93\u5165\u624b\u673a\u53f7",
+                          required: true
+                      };
+                      var loginPassword = {
+                          id: "password",
+                          icon: "fas fa-unlock-alt",
+                          placeholder: "\u8f93\u5165\u5bc6\u7801\uff086 ~ 16\u4f4d\uff09",
+                          required: true
+                      };
+                      var footer4 = [ Halogen_HTML_Elements.button([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w25)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mr3)(Halogen_Themes_Bootstrap4.mlAuto)))))), Yzmall_Utils.attr_("type")("button"), Halogen_HTML_Events.onClick(Halogen_HTML_Events.input_(BindAliPay.create)) ])([ Halogen_HTML_Core.text("\u7ed1\u5b9a") ]) ];
+                      var footer3 = [ Halogen_HTML_Elements.button([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w25)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mr3)(Halogen_Themes_Bootstrap4.mlAuto)))))), Yzmall_Utils.attr_("type")("button"), Yzmall_Utils.attr_("data-dismiss")("modal"), Halogen_HTML_Events.onClick(Halogen_HTML_Events.input_(ResetPassword.create)) ])([ Halogen_HTML_Core.text("\u4fee\u6539\u5bc6\u7801") ]) ];
+                      var footer2 = [ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.ml3)(Halogen_Themes_Bootstrap4.floatLeft))) ])([ Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text("\u5df2\u6709\u8d26\u53f7?\u73b0\u5728") ]), Halogen_HTML_Elements.a([ Conduit_Component_Utils.safeHref(new Yzmall_Data_Route.RegularCommodity(Yzmall_Data_Route.NormalHome.value)) ])([ Halogen_HTML_Core.text("\u53bb\u767b\u5f55") ]) ]), Halogen_HTML_Elements.button([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w25)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mr3)(Halogen_Themes_Bootstrap4.mlAuto)))))), Yzmall_Utils.attr_("type")("button"), Halogen_HTML_Events.onClick(Halogen_HTML_Events.input_(RegisterAction.create)) ])([ Halogen_HTML_Core.text("\u6ce8\u518c") ]) ];
+                      var footer = [ Halogen_HTML_Elements.button([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w25)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mr3)(Halogen_Themes_Bootstrap4.mlAuto)))))), Yzmall_Utils.attr_("type")("button"), Halogen_HTML_Events.onClick(Halogen_HTML_Events.input_(LoginAction.create)) ])([ Halogen_HTML_Core.text("\u767b\u5f55") ]) ];
+                      var body3 = [ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.justifyContentCenter)(Halogen_Themes_Bootstrap4.alignItemsCenter))) ])([ Halogen_HTML_Elements.img([ Yzmall_Utils.style("max-height: 150px"), Halogen_HTML_Properties.src($$String.logo) ]) ]), Halogen_HTML_Elements.form_([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formGroup) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.inputGroup)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Halogen_Themes_Bootstrap4.mb2))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.inputGroupPrepend) ])([ Halogen_HTML_Elements.span([ Yzmall_Utils.attr_("id")(r3$prime.id + "-prepend"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.inputGroupText)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.justifyContentCenter))), Yzmall_Utils.style("width: 50px") ])([ Halogen_HTML_Elements.i([ Yzmall_Utils.attr_("class")(r3$prime.icon) ])([  ]) ]) ]), Halogen_HTML_Elements.input([ Yzmall_Utils.attr_("type")("text"), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formControl), Yzmall_Utils.attr_("id")("validation-" + r3$prime.id), Halogen_HTML_Properties.placeholder(r3$prime.placeholder), Yzmall_Utils.attr_("value")(""), Halogen_HTML_Properties.required(r3$prime.required), Halogen_HTML_Events.onInput(Halogen_HTML_Events.input_(CheckPhoneNumber2.create)) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.invalidFeedback) ])([ Halogen_HTML_Core.text("") ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.inputGroup)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Halogen_Themes_Bootstrap4.mb2))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.inputGroupPrepend) ])([ Halogen_HTML_Elements.span([ Yzmall_Utils.attr_("id")(r4$prime.id + "-prepend"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.inputGroupText)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.justifyContentCenter))), Yzmall_Utils.style("width: 50px") ])([ Halogen_HTML_Elements.i([ Yzmall_Utils.attr_("class")(r4$prime.icon) ])([  ]) ]) ]), Halogen_HTML_Elements.input([ Yzmall_Utils.attr_("type")("text"), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formControl), Yzmall_Utils.attr_("id")("validation-" + r4$prime.id), Halogen_HTML_Properties.placeholder(r4$prime.placeholder), Yzmall_Utils.attr_("value")(""), Halogen_HTML_Properties.required(r4$prime.required) ]), Halogen_HTML_Elements.button([ Yzmall_Utils.attr_("type")("button"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDanger)(Halogen_Themes_Bootstrap4.ml2))), Halogen_HTML_Events.onClick(Halogen_HTML_Events.input_(GetVCode_Reset.create)), Halogen_HTML_Properties.disabled(Data_Eq.notEq(eqGetVcodeState)(v.vcodeBtnState2)(BtnAvailable.value)) ])([ Halogen_HTML_Core.text((function () {
+                          if (v.vcodeBtnState2 instanceof BtnAvailable) {
+                              return "\u83b7\u53d6";
+                          };
+                          if (v.vcodeBtnState2 instanceof BtnDisable) {
+                              return "\u83b7\u53d6";
+                          };
+                          if (v.vcodeBtnState2 instanceof BtnGrey) {
+                              return "\u5df2\u53d1\u9001";
+                          };
+                          throw new Error("Failed pattern match at Yzmall.Page.Part.Navbar line 351, column 29 - line 355, column 17: " + [ v.vcodeBtnState2.constructor.name ]);
+                      })()) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.invalidFeedback) ])([ Halogen_HTML_Core.text("") ]) ]), Yzmall_Page_Utils.renderInputGroupPassword(r5$prime), Yzmall_Page_Utils.renderInputGroupPassword(r6$prime) ]) ]) ];
+                      var body2 = [ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.justifyContentCenter)(Halogen_Themes_Bootstrap4.alignItemsCenter))) ])([ Halogen_HTML_Elements.img([ Yzmall_Utils.style("max-height: 150px"), Halogen_HTML_Properties.src($$String.logo) ]) ]), Halogen_HTML_Elements.form_([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formGroup) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.inputGroup)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Halogen_Themes_Bootstrap4.mb2))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.inputGroupPrepend) ])([ Halogen_HTML_Elements.span([ Yzmall_Utils.attr_("id")(r1.id + "-prepend"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.inputGroupText)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.justifyContentCenter))), Yzmall_Utils.style("width: 50px") ])([ Halogen_HTML_Elements.i([ Yzmall_Utils.attr_("class")(r1.icon) ])([  ]) ]) ]), Halogen_HTML_Elements.input([ Yzmall_Utils.attr_("type")("text"), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formControl), Yzmall_Utils.attr_("id")("validation-" + r1.id), Halogen_HTML_Properties.placeholder(r1.placeholder), Yzmall_Utils.attr_("value")(""), Halogen_HTML_Properties.required(r1.required), Halogen_HTML_Properties.readOnly(true) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.invalidFeedback) ])([ Halogen_HTML_Core.text("") ]) ]), Yzmall_Page_Utils.renderInputGroup(r2), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.inputGroup)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Halogen_Themes_Bootstrap4.mb2))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.inputGroupPrepend) ])([ Halogen_HTML_Elements.span([ Yzmall_Utils.attr_("id")(r3.id + "-prepend"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.inputGroupText)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.justifyContentCenter))), Yzmall_Utils.style("width: 50px") ])([ Halogen_HTML_Elements.i([ Yzmall_Utils.attr_("class")(r3.icon) ])([  ]) ]) ]), Halogen_HTML_Elements.input([ Yzmall_Utils.attr_("type")("text"), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formControl), Yzmall_Utils.attr_("id")("validation-" + r3.id), Halogen_HTML_Properties.placeholder(r3.placeholder), Yzmall_Utils.attr_("value")(""), Halogen_HTML_Properties.required(r3.required), Halogen_HTML_Events.onInput(Halogen_HTML_Events.input_(CheckPhoneNumber.create)) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.invalidFeedback) ])([ Halogen_HTML_Core.text("") ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.inputGroup)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Halogen_Themes_Bootstrap4.mb2))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.inputGroupPrepend) ])([ Halogen_HTML_Elements.span([ Yzmall_Utils.attr_("id")(r4.id + "-prepend"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.inputGroupText)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.justifyContentCenter))), Yzmall_Utils.style("width: 50px") ])([ Halogen_HTML_Elements.i([ Yzmall_Utils.attr_("class")(r4.icon) ])([  ]) ]) ]), Halogen_HTML_Elements.input([ Yzmall_Utils.attr_("type")("text"), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formControl), Yzmall_Utils.attr_("id")("validation-" + r4.id), Halogen_HTML_Properties.placeholder(r4.placeholder), Yzmall_Utils.attr_("value")(""), Halogen_HTML_Properties.required(r4.required) ]), Halogen_HTML_Elements.button([ Yzmall_Utils.attr_("type")("button"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDanger)(Halogen_Themes_Bootstrap4.ml2))), Halogen_HTML_Events.onClick(Halogen_HTML_Events.input_(GetVCode.create)), Halogen_HTML_Properties.disabled(Data_Eq.notEq(eqGetVcodeState)(v.vcodeBtnState)(BtnAvailable.value)) ])([ Halogen_HTML_Core.text((function () {
+                          if (v.vcodeBtnState instanceof BtnAvailable) {
+                              return "\u83b7\u53d6";
+                          };
+                          if (v.vcodeBtnState instanceof BtnDisable) {
+                              return "\u83b7\u53d6";
+                          };
+                          if (v.vcodeBtnState instanceof BtnGrey) {
+                              return "\u5df2\u53d1\u9001";
+                          };
+                          throw new Error("Failed pattern match at Yzmall.Page.Part.Navbar line 256, column 29 - line 260, column 17: " + [ v.vcodeBtnState.constructor.name ]);
+                      })()) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.invalidFeedback) ])([ Halogen_HTML_Core.text("") ]) ]), Yzmall_Page_Utils.renderInputGroupPassword(r5), Yzmall_Page_Utils.renderInputGroupPassword(r6) ]) ]) ];
+                      var body = [ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.justifyContentCenter)(Halogen_Themes_Bootstrap4.alignItemsCenter))) ])([ Halogen_HTML_Elements.img([ Yzmall_Utils.style("max-height: 150px"), Halogen_HTML_Properties.src($$String.logo) ]) ]), Halogen_HTML_Elements.form_([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formGroup) ])([ Yzmall_Page_Utils.renderInputGroup(loginPhone), Yzmall_Page_Utils.renderInputGroupPassword(loginPassword) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.dFlex)) ])([ Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mr3)(Halogen_Themes_Bootstrap4.mlAuto)), Yzmall_Utils.attr_("data-dismiss")("modal"), Yzmall_Utils.attr_("data-toggle")("modal"), Yzmall_Utils.attr_("data-target")("#resetPasswordModal") ])([ Halogen_HTML_Core.text("\u5fd8\u8bb0\u5bc6\u7801") ]) ]) ];
+                      var aliPayInput2 = {
+                          id: "alipay2",
+                          icon: "fab fa-alipay fa-2x",
+                          placeholder: "\u786e\u8ba4\u652f\u4ed8\u5b9d\u8d26\u53f7",
+                          required: true
+                      };
+                      var aliPayInput = {
+                          id: "alipay",
+                          icon: "fab fa-alipay fa-2x",
+                          placeholder: "\u8f93\u5165\u652f\u4ed8\u5b9d\u8d26\u53f7",
+                          required: true
+                      };
+                      var body4 = [ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.justifyContentCenter)(Halogen_Themes_Bootstrap4.alignItemsCenter))) ])([ Halogen_HTML_Elements.img([ Yzmall_Utils.style("max-height: 150px"), Halogen_HTML_Properties.src($$String.logo) ]) ]), Halogen_HTML_Elements.form_([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formGroup) ])([ Yzmall_Page_Utils.renderInputGroup(aliPayInput), Yzmall_Page_Utils.renderInputGroup(aliPayInput2), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Halogen_Themes_Bootstrap4.px3))) ])([ Halogen_HTML_Elements.p([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.fontWeightBold)(Halogen_Themes_Bootstrap4.my2)) ])([ Halogen_HTML_Core.text("\u91cd\u8981\u63d0\u793a\uff01") ]), Halogen_HTML_Elements.p([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.fontWeightNormal)(Halogen_Themes_Bootstrap4.mb0)) ])([ Halogen_HTML_Core.text($$String.alipayNote) ]) ]) ]) ]) ];
+                      return Halogen_HTML_Elements.div_([ renderNavBar(v), Yzmall_Utils.renderModal("loginModal")("\u767b\u5f55")(footer)(body)(true), Yzmall_Utils.renderModal("registerModal")("\u6ce8\u518c")(footer2)(body2)(true), Yzmall_Utils.renderModal("resetPasswordModal")("\u91cd\u7f6e\u5bc6\u7801")(footer3)(body3)(true), Yzmall_Utils.renderModal("bindAlipayModal")("\u7ed1\u5b9a\u652f\u4ed8\u5b9d")(footer4)(body4)(false) ]);
+                  };
+                  var initialState = function (v) {
+                      return {
+                          currentAccount: Data_Maybe.Nothing.value,
+                          vcodeBtnState: BtnDisable.value,
+                          vcodeBtnState2: BtnDisable.value,
+                          intervalId: Data_Maybe.Nothing.value,
+                          page: v.page
+                      };
+                  };
+                  var $$eval = function (v) {
+                      if (v instanceof Initialize) {
+                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_Reader_Class.ask(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk)))(function (v1) {
+                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Effect_Ref.read(v1.currentAccount)))(function (v2) {
+                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v3) {
+                                      var $80 = {};
+                                      for (var $81 in v3) {
+                                          if ({}.hasOwnProperty.call(v3, $81)) {
+                                              $80[$81] = v3[$81];
+                                          };
+                                      };
+                                      $80.currentAccount = v2;
+                                      return $80;
+                                  }))(function () {
+                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                  });
+                              });
+                          });
+                      };
+                      if (v instanceof Reset) {
+                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v1) {
+                              var $86 = {};
+                              for (var $87 in v1) {
+                                  if ({}.hasOwnProperty.call(v1, $87)) {
+                                      $86[$87] = v1[$87];
+                                  };
+                              };
+                              $86.page = (function () {
+                                  if (v.value0) {
+                                      return First.value;
+                                  };
+                                  return Second.value;
+                              })();
+                              return $86;
+                          }))(function () {
+                              return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value1);
+                          });
+                      };
+                      if (v instanceof LoginAction) {
+                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("validation-phone")))(function (v1) {
+                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("validation-password")))(function (v2) {
+                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Account.login(Yzmall_Api_Capablity_Resource_Account.manageAccountHalogenM(dictManageAccount))({
+                                      phone: v1,
+                                      password: v2
+                                  }))(function (v3) {
+                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_Reader_Class.ask(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk)))(function (v4) {
+                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Effect_Ref.write(v3)(v4.currentAccount)))(function () {
+                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)((function () {
+                                                  if (v3 instanceof Data_Maybe.Just) {
+                                                      return Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.alertMsg("\u767b\u5f55\u6210\u529f"));
+                                                  };
+                                                  if (v3 instanceof Data_Maybe.Nothing) {
+                                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                                  };
+                                                  throw new Error("Failed pattern match at Yzmall.Page.Part.Navbar line 504, column 7 - line 508, column 20: " + [ v3.constructor.name ]);
+                                              })())(function () {
+                                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v5) {
+                                                      var $97 = {};
+                                                      for (var $98 in v5) {
+                                                          if ({}.hasOwnProperty.call(v5, $98)) {
+                                                              $97[$98] = v5[$98];
+                                                          };
+                                                      };
+                                                      $97.currentAccount = v3;
+                                                      return $97;
+                                                  }))(function () {
+                                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.closeLoginModal))(function () {
+                                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                                      });
+                                                  });
+                                              });
+                                          });
+                                      });
+                                  });
+                              });
+                          });
+                      };
+                      if (v instanceof RegisterAction) {
+                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("validation-inviter")))(function (v1) {
+                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("validation-nickname")))(function (v2) {
+                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("validation-phone-register")))(function (v3) {
+                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("validation-vcode")))(function (v4) {
+                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("validation-password1")))(function (v5) {
+                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("validation-password2")))(function (v6) {
+                                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)((function () {
+                                                      var v7 = v1 !== "";
+                                                      if (v7) {
+                                                          var v8 = v6 === v5;
+                                                          if (v8) {
+                                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Account.createAccount(Yzmall_Api_Capablity_Resource_Account.manageAccountHalogenM(dictManageAccount))({
+                                                                  inviter: v1,
+                                                                  nickname: v2,
+                                                                  phone: v3,
+                                                                  vcode: v4,
+                                                                  password: v5
+                                                              }))(function (v9) {
+                                                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Applicative.when(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Maybe.isJust(v9))(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.alertMsg("\u6ce8\u518c\u6210\u529f\uff0c\u5df2\u81ea\u52a8\u767b\u5f55"))))(function () {
+                                                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_Reader_Class.ask(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk)))(function (v10) {
+                                                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Effect_Ref.write(v9)(v10.currentAccount)))(function () {
+                                                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v11) {
+                                                                                  var $112 = {};
+                                                                                  for (var $113 in v11) {
+                                                                                      if ({}.hasOwnProperty.call(v11, $113)) {
+                                                                                          $112[$113] = v11[$113];
+                                                                                      };
+                                                                                  };
+                                                                                  $112.currentAccount = v9;
+                                                                                  return $112;
+                                                                              }))(function () {
+                                                                                  return Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.closeRegisterModal);
+                                                                              });
+                                                                          });
+                                                                      });
+                                                                  });
+                                                              });
+                                                          };
+                                                          if (!v8) {
+                                                              return Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.alertMsg("\u5bc6\u7801\u4e0d\u4e00\u81f4"));
+                                                          };
+                                                          throw new Error("Failed pattern match at Yzmall.Page.Part.Navbar line 521, column 11 - line 532, column 9: " + [ v8.constructor.name ]);
+                                                      };
+                                                      if (!v7) {
+                                                          return Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.alertMsg("\u9080\u8bf7\u8005\u4e0d\u53ef\u4e3a\u7a7a"));
+                                                      };
+                                                      throw new Error("Failed pattern match at Yzmall.Page.Part.Navbar line 519, column 7 - line 534, column 7: " + [ v7.constructor.name ]);
+                                                  })())(function () {
+                                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                                  });
+                                              });
+                                          });
+                                      });
+                                  });
+                              });
+                          });
+                      };
+                      if (v instanceof GetVCode) {
+                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("validation-phone-register")))(function (v1) {
+                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v2) {
+                                  var $118 = {};
+                                  for (var $119 in v2) {
+                                      if ({}.hasOwnProperty.call(v2, $119)) {
+                                          $118[$119] = v2[$119];
+                                      };
+                                  };
+                                  $118.vcodeBtnState = BtnGrey.value;
+                                  return $118;
+                              }))(function () {
+                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Account.createVcode(Yzmall_Api_Capablity_Resource_Account.manageAccountHalogenM(dictManageAccount))(v1))(function (v2) {
+                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                  });
+                              });
+                          });
+                      };
+                      if (v instanceof GetVCode_Reset) {
+                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("validation-phone-resetPassword")))(function (v1) {
+                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v2) {
+                                  var $123 = {};
+                                  for (var $124 in v2) {
+                                      if ({}.hasOwnProperty.call(v2, $124)) {
+                                          $123[$124] = v2[$124];
+                                      };
+                                  };
+                                  $123.vcodeBtnState2 = BtnGrey.value;
+                                  return $123;
+                              }))(function () {
+                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Account.createVcode(Yzmall_Api_Capablity_Resource_Account.manageAccountHalogenM(dictManageAccount))(v1))(function (v2) {
+                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                  });
+                              });
+                          });
+                      };
+                      if (v instanceof ResetPassword) {
+                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("validation-phone-resetPassword")))(function (v1) {
+                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("validation-vcode-resetPassword")))(function (v2) {
+                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("validation-password1-resetPassword")))(function (v3) {
+                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("validation-password2-resetPassword")))(function (v4) {
+                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)((function () {
+                                              var v5 = v4 === v3;
+                                              if (v5) {
+                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Account.resetPassword(Yzmall_Api_Capablity_Resource_Account.manageAccountHalogenM(dictManageAccount))({
+                                                      phone: v1,
+                                                      vcode: v2,
+                                                      password: v3
+                                                  }))(function (v6) {
+                                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_Reader_Class.ask(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk)))(function (v7) {
+                                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Effect_Ref.write(v6)(v7.currentAccount)))(function () {
+                                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)((function () {
+                                                                  if (v6 instanceof Data_Maybe.Just) {
+                                                                      return Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.alertMsg("\u5bc6\u7801\u4fee\u6539\u6210\u529f"));
+                                                                  };
+                                                                  if (v6 instanceof Data_Maybe.Nothing) {
+                                                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                                                  };
+                                                                  throw new Error("Failed pattern match at Yzmall.Page.Part.Navbar line 570, column 11 - line 574, column 24: " + [ v6.constructor.name ]);
+                                                              })())(function () {
+                                                                  return Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v8) {
+                                                                      var $136 = {};
+                                                                      for (var $137 in v8) {
+                                                                          if ({}.hasOwnProperty.call(v8, $137)) {
+                                                                              $136[$137] = v8[$137];
+                                                                          };
+                                                                      };
+                                                                      $136.currentAccount = v6;
+                                                                      return $136;
+                                                                  });
+                                                              });
+                                                          });
+                                                      });
+                                                  });
+                                              };
+                                              if (!v5) {
+                                                  return Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.alertMsg("\u5bc6\u7801\u4e0d\u4e00\u81f4"));
+                                              };
+                                              throw new Error("Failed pattern match at Yzmall.Page.Part.Navbar line 565, column 7 - line 578, column 7: " + [ v5.constructor.name ]);
+                                          })())(function () {
+                                              return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                          });
+                                      });
+                                  });
+                              });
+                          });
+                      };
+                      if (v instanceof CheckPhoneNumber) {
+                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("validation-phone-register")))(function (v1) {
+                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.get(Halogen_Query_HalogenM.monadStateHalogenM))(function (v2) {
+                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)((function () {
+                                      var v3 = Data_String_CodePoints.length(v1) === 11;
+                                      if (v3) {
+                                          var $144 = Data_Eq.eq(eqGetVcodeState)(v2.vcodeBtnState)(BtnDisable.value);
+                                          if ($144) {
+                                              return Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v4) {
+                                                  var $145 = {};
+                                                  for (var $146 in v4) {
+                                                      if ({}.hasOwnProperty.call(v4, $146)) {
+                                                          $145[$146] = v4[$146];
+                                                      };
+                                                  };
+                                                  $145.vcodeBtnState = BtnAvailable.value;
+                                                  return $145;
+                                              });
+                                          };
+                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                      };
+                                      if (!v3) {
+                                          var $148 = Data_Eq.eq(eqGetVcodeState)(v2.vcodeBtnState)(BtnAvailable.value);
+                                          if ($148) {
+                                              return Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v4) {
+                                                  var $149 = {};
+                                                  for (var $150 in v4) {
+                                                      if ({}.hasOwnProperty.call(v4, $150)) {
+                                                          $149[$150] = v4[$150];
+                                                      };
+                                                  };
+                                                  $149.vcodeBtnState = BtnDisable.value;
+                                                  return $149;
+                                              });
+                                          };
+                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                      };
+                                      throw new Error("Failed pattern match at Yzmall.Page.Part.Navbar line 582, column 7 - line 586, column 109: " + [ v3.constructor.name ]);
+                                  })())(function () {
+                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                  });
+                              });
+                          });
+                      };
+                      if (v instanceof CheckPhoneNumber2) {
+                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("validation-phone-resetPassword")))(function (v1) {
+                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.get(Halogen_Query_HalogenM.monadStateHalogenM))(function (v2) {
+                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)((function () {
+                                      var v3 = Data_String_CodePoints.length(v1) === 11;
+                                      if (v3) {
+                                          var $156 = Data_Eq.eq(eqGetVcodeState)(v2.vcodeBtnState2)(BtnDisable.value);
+                                          if ($156) {
+                                              return Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v4) {
+                                                  var $157 = {};
+                                                  for (var $158 in v4) {
+                                                      if ({}.hasOwnProperty.call(v4, $158)) {
+                                                          $157[$158] = v4[$158];
+                                                      };
+                                                  };
+                                                  $157.vcodeBtnState2 = BtnAvailable.value;
+                                                  return $157;
+                                              });
+                                          };
+                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                      };
+                                      if (!v3) {
+                                          var $160 = Data_Eq.eq(eqGetVcodeState)(v2.vcodeBtnState2)(BtnAvailable.value);
+                                          if ($160) {
+                                              return Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v4) {
+                                                  var $161 = {};
+                                                  for (var $162 in v4) {
+                                                      if ({}.hasOwnProperty.call(v4, $162)) {
+                                                          $161[$162] = v4[$162];
+                                                      };
+                                                  };
+                                                  $161.vcodeBtnState2 = BtnDisable.value;
+                                                  return $161;
+                                              });
+                                          };
+                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                      };
+                                      throw new Error("Failed pattern match at Yzmall.Page.Part.Navbar line 591, column 7 - line 595, column 111: " + [ v3.constructor.name ]);
+                                  })())(function () {
+                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                  });
+                              });
+                          });
+                      };
+                      if (v instanceof BindAliPay) {
+                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("validation-alipay")))(function (v1) {
+                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("validation-alipay2")))(function (v2) {
+                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)((function () {
+                                      var v3 = v1 !== "";
+                                      if (v3) {
+                                          var v4 = v1 === v2;
+                                          if (v4) {
+                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Account.bindAlipay(Yzmall_Api_Capablity_Resource_Account.manageAccountHalogenM(dictManageAccount))(v1))(function (v5) {
+                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_Reader_Class.ask(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk)))(function (v6) {
+                                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Effect_Ref.write(v5)(v6.currentAccount)))(function () {
+                                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v7) {
+                                                              var $171 = {};
+                                                              for (var $172 in v7) {
+                                                                  if ({}.hasOwnProperty.call(v7, $172)) {
+                                                                      $171[$172] = v7[$172];
+                                                                  };
+                                                              };
+                                                              $171.currentAccount = v5;
+                                                              return $171;
+                                                          }))(function () {
+                                                              return Control_Applicative.when(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Maybe.isJust(v5))(Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.closeBindAlipayModal))(function () {
+                                                                  return Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.alertMsg("\u652f\u4ed8\u5b9d\u8d26\u53f7\u7ed1\u5b9a\u6210\u529f"));
+                                                              }));
+                                                          });
+                                                      });
+                                                  });
+                                              });
+                                          };
+                                          if (!v4) {
+                                              return Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.alertMsg("\u652f\u4ed8\u5b9d\u8d26\u53f7\u4e0d\u4e00\u81f4"));
+                                          };
+                                          throw new Error("Failed pattern match at Yzmall.Page.Part.Navbar line 602, column 11 - line 613, column 9: " + [ v4.constructor.name ]);
+                                      };
+                                      if (!v3) {
+                                          return Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.alertMsg("\u652f\u4ed8\u5b9d\u8d26\u53f7\u4e0d\u53ef\u4e3a\u7a7a"));
+                                      };
+                                      throw new Error("Failed pattern match at Yzmall.Page.Part.Navbar line 600, column 7 - line 615, column 7: " + [ v3.constructor.name ]);
+                                  })())(function () {
+                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                  });
+                              });
+                          });
+                      };
+                      throw new Error("Failed pattern match at Yzmall.Page.Part.Navbar line 489, column 10 - line 615, column 13: " + [ v.constructor.name ]);
+                  };
+                  return Halogen_Component.lifecycleComponent(Halogen_HTML_Core.bifunctorHTML)({
+                      initialState: initialState,
+                      render: render,
+                      "eval": $$eval,
+                      receiver: Data_Function["const"](Data_Maybe.Nothing.value),
+                      initializer: Data_Maybe.Just.create(Halogen_Query.action(Initialize.create)),
+                      finalizer: Data_Maybe.Nothing.value
+                  });
+              };
+          };
+      };
+  };
+  exports["First"] = First;
+  exports["Second"] = Second;
+  exports["Third"] = Third;
+  exports["Fourth"] = Fourth;
+  exports["BtnAvailable"] = BtnAvailable;
+  exports["BtnDisable"] = BtnDisable;
+  exports["BtnGrey"] = BtnGrey;
+  exports["Initialize"] = Initialize;
+  exports["Reset"] = Reset;
+  exports["LoginAction"] = LoginAction;
+  exports["RegisterAction"] = RegisterAction;
+  exports["GetVCode"] = GetVCode;
+  exports["GetVCode_Reset"] = GetVCode_Reset;
+  exports["ResetPassword"] = ResetPassword;
+  exports["CheckPhoneNumber"] = CheckPhoneNumber;
+  exports["CheckPhoneNumber2"] = CheckPhoneNumber2;
+  exports["BindAliPay"] = BindAliPay;
+  exports["component"] = component;
+  exports["renderNavBar"] = renderNavBar;
+  exports["eqNavbarPage"] = eqNavbarPage;
+  exports["eqGetVcodeState"] = eqGetVcodeState;
+})(PS["Yzmall.Page.Part.Navbar"] = PS["Yzmall.Page.Part.Navbar"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Conduit_Component_Utils = PS["Conduit.Component.Utils"];
+  var Data_Eq = PS["Data.Eq"];
+  var Data_Function = PS["Data.Function"];
+  var Data_Maybe = PS["Data.Maybe"];
   var Data_Semigroup = PS["Data.Semigroup"];
   var Halogen = PS["Halogen"];
   var Halogen_HTML = PS["Halogen.HTML"];
@@ -32550,35 +35837,50 @@ var PS = {};
   var Halogen_Themes_Bootstrap4 = PS["Halogen.Themes.Bootstrap4"];
   var Prelude = PS["Prelude"];
   var $$String = PS["String"];
+  var Yzmall_Data_Route = PS["Yzmall.Data.Route"];
+  var Yzmall_Page_Part_Navbar = PS["Yzmall.Page.Part.Navbar"];
   var Yzmall_Page_Utils = PS["Yzmall.Page.Utils"];
   var Yzmall_Utils = PS["Yzmall.Utils"];                 
-  var renderMenuItem = function (v) {
-      return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDark)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Halogen_Themes_Bootstrap4.w25)))))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.flexColumn)) ])([ Halogen_HTML_Elements.img([ Halogen_HTML_Properties.src(v.selectedIconSrc), Yzmall_Utils.style("width: 32px; height: 32px"), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mxAuto) ]), Halogen_HTML_Elements.p([ Yzmall_Utils.style("color: #FC5106"), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.m0) ])([ Halogen_HTML_Core.text(v.name) ]) ]), Halogen_HTML_Elements.input([ Yzmall_Utils.attr_("type")("radio"), Yzmall_Utils.attr_("autocomplete")("off") ]) ]);
-  };
-  var menuConfigs = [ {
-      iconSrc: $$String.regularIcon,
-      selectedIconSrc: $$String.regularIconM,
-      name: "\u6b63\u4ef7\u533a",
-      href: "#"
-  }, {
-      iconSrc: $$String.specialIcon,
-      selectedIconSrc: $$String.specialIconM,
-      name: "\u7279\u4ef7\u533a",
-      href: "#"
-  }, {
-      iconSrc: $$String.recordIcon,
-      selectedIconSrc: $$String.recordIconM,
-      name: "\u4ea4\u6613\u4e2d\u5fc3",
-      href: "#"
-  }, {
+  var renderMenuItem = function (page1) {
+      return function (page2) {
+          return function (v) {
+              return function (route) {
+                  return Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Yzmall_Utils.append(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDark)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Halogen_Themes_Bootstrap4.alignItemsCenter)))))((function () {
+                      var $5 = Data_Eq.eq(Yzmall_Page_Part_Navbar.eqNavbarPage)(page1)(page2);
+                      if ($5) {
+                          return "menuItemActive";
+                      };
+                      return "menuItemInactive";
+                  })())), Conduit_Component_Utils.safeHref(route), Yzmall_Utils.style("width: 33.3333%") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.flexColumn)) ])([ Halogen_HTML_Elements.img([ Halogen_HTML_Properties.src(v.selectedIconSrc), Yzmall_Utils.style("width: 32px; height: 32px"), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mxAuto) ]), Halogen_HTML_Elements.p([ Yzmall_Utils.style("color: #F3DDB4"), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.m0) ])([ Halogen_HTML_Core.text(v.name) ]) ]) ]);
+              };
+          };
+      };
+  };                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           
+  var m4 = {
       iconSrc: $$String.accountIcon,
       selectedIconSrc: $$String.accountIconM,
       name: "\u4e2a\u4eba\u4e2d\u5fc3",
       href: "#"
-  } ];
-  var mobileMenu = Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnGroup)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnGroupToggle)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)("d-md-none")(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.justifyContentBetween)(Halogen_Themes_Bootstrap4.fixedBottom))))))), Yzmall_Utils.attr_("data-toggle")("buttons") ])(Data_Functor.map(Data_Functor.functorArray)(renderMenuItem)(menuConfigs));
+  };
+  var m3 = {
+      iconSrc: $$String.recordIcon,
+      selectedIconSrc: $$String.recordIconM,
+      name: "\u4ea4\u6613\u4e2d\u5fc3",
+      href: "#"
+  };
+  var m1 = {
+      iconSrc: $$String.regularIcon,
+      selectedIconSrc: $$String.regularIconM,
+      name: "\u6b63\u4ef7\u533a",
+      href: "#"
+  };
+  var mobileMenu = function (page) {
+      return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnGroup)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)("d-md-none")(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.justifyContentBetween)(Halogen_Themes_Bootstrap4.fixedBottom)))))), Yzmall_Utils.attr_("role")("group") ])([ renderMenuItem(page)(Yzmall_Page_Part_Navbar.First.value)(m1)(new Yzmall_Data_Route.RegularCommodity(Yzmall_Data_Route.NormalHome.value)), renderMenuItem(page)(Yzmall_Page_Part_Navbar.Third.value)(m3)(Yzmall_Data_Route.TradeCenter.value), renderMenuItem(page)(Yzmall_Page_Part_Navbar.Fourth.value)(m4)(new Yzmall_Data_Route.PC_ROUTER(Data_Maybe.Nothing.value)) ]);
+  };
   var forMobileMenu = Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)("d-md-none")(Halogen_Themes_Bootstrap4.bgTransparent))), Yzmall_Utils.style("height: 70px") ])([  ]);
-  exports["menuConfigs"] = menuConfigs;
+  exports["m1"] = m1;
+  exports["m3"] = m3;
+  exports["m4"] = m4;
   exports["forMobileMenu"] = forMobileMenu;
   exports["mobileMenu"] = mobileMenu;
   exports["renderMenuItem"] = renderMenuItem;
@@ -32590,13 +35892,1415 @@ var PS = {};
   var Control_Applicative = PS["Control.Applicative"];
   var Control_Bind = PS["Control.Bind"];
   var Control_Monad_Reader = PS["Control.Monad.Reader"];
+  var Control_Monad_State = PS["Control.Monad.State"];
   var Control_Monad_State_Class = PS["Control.Monad.State.Class"];
+  var Data_Either = PS["Data.Either"];
+  var Data_Function = PS["Data.Function"];
+  var Data_Lens = PS["Data.Lens"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Data_Ord = PS["Data.Ord"];
+  var Data_Semigroup = PS["Data.Semigroup"];
+  var Data_Show = PS["Data.Show"];
+  var Data_Tuple = PS["Data.Tuple"];
+  var Data_Unit = PS["Data.Unit"];
+  var Data_Void = PS["Data.Void"];
+  var Effect_Aff_Class = PS["Effect.Aff.Class"];
+  var Effect_Ref = PS["Effect.Ref"];
+  var Effect_Unsafe = PS["Effect.Unsafe"];
+  var Halogen = PS["Halogen"];
+  var Halogen_Component = PS["Halogen.Component"];
+  var Halogen_HTML = PS["Halogen.HTML"];
+  var Halogen_HTML_Core = PS["Halogen.HTML.Core"];
+  var Halogen_HTML_Elements = PS["Halogen.HTML.Elements"];
+  var Halogen_HTML_Events = PS["Halogen.HTML.Events"];
+  var Halogen_HTML_Properties = PS["Halogen.HTML.Properties"];
+  var Halogen_Query = PS["Halogen.Query"];
+  var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
+  var Halogen_Themes_Bootstrap4 = PS["Halogen.Themes.Bootstrap4"];
+  var Network_RemoteData = PS["Network.RemoteData"];
+  var Partial_Unsafe = PS["Partial.Unsafe"];
+  var Prelude = PS["Prelude"];
+  var $$String = PS["String"];
+  var Web_HTML_HTMLInputElement = PS["Web.HTML.HTMLInputElement"];
+  var Yzmall_Api_Capablity_Resource_Account = PS["Yzmall.Api.Capablity.Resource.Account"];
+  var Yzmall_Api_Capablity_Resource_Address = PS["Yzmall.Api.Capablity.Resource.Address"];
+  var Yzmall_Api_Capablity_Resource_CommodityOrder = PS["Yzmall.Api.Capablity.Resource.CommodityOrder"];
+  var Yzmall_Capability_Navigate = PS["Yzmall.Capability.Navigate"];
+  var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
+  var Yzmall_Data_Address = PS["Yzmall.Data.Address"];
+  var Yzmall_Data_Route = PS["Yzmall.Data.Route"];
+  var Yzmall_Page_Part_Login = PS["Yzmall.Page.Part.Login"];
+  var Yzmall_Page_Part_MobileMenu = PS["Yzmall.Page.Part.MobileMenu"];
+  var Yzmall_Page_Part_Navbar = PS["Yzmall.Page.Part.Navbar"];
+  var Yzmall_Page_Utils = PS["Yzmall.Page.Utils"];
+  var Yzmall_Resource_Commodity = PS["Yzmall.Resource.Commodity"];
+  var Yzmall_Utils = PS["Yzmall.Utils"];                 
+  var Initialize = (function () {
+      function Initialize(value0) {
+          this.value0 = value0;
+      };
+      Initialize.create = function (value0) {
+          return new Initialize(value0);
+      };
+      return Initialize;
+  })();
+  var itemClass = Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItem)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.rounded0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemDark)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemAction)(Halogen_Themes_Bootstrap4.textWhite)))))));
+  var renderBaseInfo = function (dictShow) {
+      return function (account) {
+          var grade = function (v) {
+              if (v === 1) {
+                  return "VIP\u4f1a\u5458";
+              };
+              if (v === 2) {
+                  return "\u603b\u76d1";
+              };
+              if (v === 3) {
+                  return "\u603b\u88c1";
+              };
+              return "\u7528\u6237";
+          };
+          var bar = function (leftText) {
+              return function (rightText) {
+                  return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(itemClass), Yzmall_Utils.style("font-size: 15px; margin-bottom: 1px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRow)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.alignItemsCenter))))) ])([ Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text(leftText) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto) ])([ Halogen_HTML_Core.text(rightText) ]) ]) ]);
+              };
+          };
+          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroup)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb3)(Halogen_Themes_Bootstrap4.mxAuto))) ])([ bar("ID")(Data_Show.show(dictShow)(account.id)), bar("\u624b\u673a")(account.phone), bar("\u6635\u79f0")(account.nickname), bar("\u771f\u5b9e\u59d3\u540d")(Data_Maybe.fromMaybe("")(account.name)), bar("\u7b49\u7ea7")(grade(account.grade)) ]);
+      };
+  };
+  var component = function (dictMonadAff) {
+      return function (dictManageCommodity) {
+          return function (dictManageAccount) {
+              return function (dictManageOrder) {
+                  return function (dictManageAddress) {
+                      return function (dictMonadAsk) {
+                          return function (dictNavigate) {
+                              var render = function (state) {
+                                  return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Halogen_HTML.slot(Data_Unit.unit)(Yzmall_Page_Part_Navbar.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageAccount))({
+                                      page: Yzmall_Page_Part_Navbar.Fourth.value
+                                  })(Data_Void.absurd), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.mt3)))), Yzmall_Utils.style("min-height: 633px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.rounded0)(Halogen_Themes_Bootstrap4.textWhite))))), Yzmall_Utils.style("font-size: 15px; margin-bottom: 1px; background-color: #625C4E") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRow)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Halogen_Themes_Bootstrap4.py2)))))) ])([ Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text("\u57fa\u672c\u4fe1\u606f") ]) ]) ]), Conduit_Component_Utils.maybeElem(state.currentAccount)(renderBaseInfo(Data_Show.showInt)) ]), Yzmall_Utils.renderFooter, Yzmall_Page_Part_MobileMenu.mobileMenu(Yzmall_Page_Part_Navbar.Fourth.value), Yzmall_Page_Part_MobileMenu.forMobileMenu ]);
+                              };
+                              var initialState = function (v) {
+                                  return {
+                                      currentAccount: Data_Maybe.Nothing.value
+                                  };
+                              };
+                              var $$eval = function (v) {
+                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Conduit_Component_Utils.guardAccount(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk))(Yzmall_Capability_Navigate.navigateHalogenM(dictNavigate)))(function (v1) {
+                                      if (v1 instanceof Data_Maybe.Nothing) {
+                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                      };
+                                      return Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v2) {
+                                          var $16 = {};
+                                          for (var $17 in v2) {
+                                              if ({}.hasOwnProperty.call(v2, $17)) {
+                                                  $16[$17] = v2[$17];
+                                              };
+                                          };
+                                          $16.currentAccount = v1;
+                                          return $16;
+                                      });
+                                  }))(function () {
+                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                  });
+                              };
+                              return Halogen_Component.lifecycleParentComponent(Data_Ord.ordUnit)({
+                                  initialState: initialState,
+                                  render: render,
+                                  "eval": $$eval,
+                                  receiver: Data_Function["const"](Data_Maybe.Nothing.value),
+                                  initializer: Data_Maybe.Just.create(Halogen_Query.action(Initialize.create)),
+                                  finalizer: Data_Maybe.Nothing.value
+                              });
+                          };
+                      };
+                  };
+              };
+          };
+      };
+  };
+  exports["Initialize"] = Initialize;
+  exports["component"] = component;
+  exports["itemClass"] = itemClass;
+  exports["renderBaseInfo"] = renderBaseInfo;
+})(PS["Yzmall.Page.AccountInfo"] = PS["Yzmall.Page.AccountInfo"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Conduit_Component_Utils = PS["Conduit.Component.Utils"];
+  var Control_Applicative = PS["Control.Applicative"];
+  var Control_Apply = PS["Control.Apply"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Monad_Reader = PS["Control.Monad.Reader"];
+  var Control_Monad_Reader_Class = PS["Control.Monad.Reader.Class"];
+  var Control_Monad_State_Class = PS["Control.Monad.State.Class"];
+  var Data_Either = PS["Data.Either"];
   var Data_Eq = PS["Data.Eq"];
   var Data_Function = PS["Data.Function"];
   var Data_Functor = PS["Data.Functor"];
+  var Data_Lens = PS["Data.Lens"];
+  var Data_Lens_Fold = PS["Data.Lens.Fold"];
+  var Data_Lens_Internal_Forget = PS["Data.Lens.Internal.Forget"];
   var Data_Maybe = PS["Data.Maybe"];
+  var Data_Maybe_First = PS["Data.Maybe.First"];
+  var Data_Ord = PS["Data.Ord"];
   var Data_Semigroup = PS["Data.Semigroup"];
   var Data_Show = PS["Data.Show"];
+  var Data_Tuple = PS["Data.Tuple"];
+  var Data_Unit = PS["Data.Unit"];
+  var Data_Void = PS["Data.Void"];
+  var Effect_Aff_Class = PS["Effect.Aff.Class"];
+  var Effect_Class = PS["Effect.Class"];
+  var Effect_Ref = PS["Effect.Ref"];
+  var Effect_Unsafe = PS["Effect.Unsafe"];
+  var Halogen = PS["Halogen"];
+  var Halogen_Component = PS["Halogen.Component"];
+  var Halogen_HTML = PS["Halogen.HTML"];
+  var Halogen_HTML_Core = PS["Halogen.HTML.Core"];
+  var Halogen_HTML_Elements = PS["Halogen.HTML.Elements"];
+  var Halogen_HTML_Events = PS["Halogen.HTML.Events"];
+  var Halogen_HTML_Properties = PS["Halogen.HTML.Properties"];
+  var Halogen_Query = PS["Halogen.Query"];
+  var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
+  var Halogen_Themes_Bootstrap4 = PS["Halogen.Themes.Bootstrap4"];
+  var Network_RemoteData = PS["Network.RemoteData"];
+  var Partial_Unsafe = PS["Partial.Unsafe"];
+  var Prelude = PS["Prelude"];
+  var $$String = PS["String"];
+  var Web_HTML_HTMLInputElement = PS["Web.HTML.HTMLInputElement"];
+  var Yzmall_Api_Capablity_Resource_Account = PS["Yzmall.Api.Capablity.Resource.Account"];
+  var Yzmall_Api_Capablity_Resource_Address = PS["Yzmall.Api.Capablity.Resource.Address"];
+  var Yzmall_Api_Capablity_Resource_CommodityOrder = PS["Yzmall.Api.Capablity.Resource.CommodityOrder"];
+  var Yzmall_Capability_Navigate = PS["Yzmall.Capability.Navigate"];
+  var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
+  var Yzmall_Data_Address = PS["Yzmall.Data.Address"];
+  var Yzmall_Data_Route = PS["Yzmall.Data.Route"];
+  var Yzmall_Page_Part_Login = PS["Yzmall.Page.Part.Login"];
+  var Yzmall_Page_Part_MobileMenu = PS["Yzmall.Page.Part.MobileMenu"];
+  var Yzmall_Page_Part_Navbar = PS["Yzmall.Page.Part.Navbar"];
+  var Yzmall_Page_Utils = PS["Yzmall.Page.Utils"];
+  var Yzmall_Resource_Commodity = PS["Yzmall.Resource.Commodity"];
+  var Yzmall_Utils = PS["Yzmall.Utils"];                 
+  var Initialize = (function () {
+      function Initialize(value0) {
+          this.value0 = value0;
+      };
+      Initialize.create = function (value0) {
+          return new Initialize(value0);
+      };
+      return Initialize;
+  })();
+  var GetAddresses = (function () {
+      function GetAddresses(value0) {
+          this.value0 = value0;
+      };
+      GetAddresses.create = function (value0) {
+          return new GetAddresses(value0);
+      };
+      return GetAddresses;
+  })();
+  var AddAddress = (function () {
+      function AddAddress(value0) {
+          this.value0 = value0;
+      };
+      AddAddress.create = function (value0) {
+          return new AddAddress(value0);
+      };
+      return AddAddress;
+  })();
+  var DeleteAddress = (function () {
+      function DeleteAddress(value0, value1) {
+          this.value0 = value0;
+          this.value1 = value1;
+      };
+      DeleteAddress.create = function (value0) {
+          return function (value1) {
+              return new DeleteAddress(value0, value1);
+          };
+      };
+      return DeleteAddress;
+  })();
+  var Uploading = (function () {
+      function Uploading() {
+
+      };
+      Uploading.value = new Uploading();
+      return Uploading;
+  })();
+  var OJBK = (function () {
+      function OJBK() {
+
+      };
+      OJBK.value = new OJBK();
+      return OJBK;
+  })();
+  var itemClass = Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItem)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.rounded0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemDark)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemAction)(Halogen_Themes_Bootstrap4.textWhite)))))));
+  var renderAddress = function (dictEq) {
+      return function (mbAddrId) {
+          return function (addr) {
+              var isDefault = function (id) {
+                  var $35 = Data_Eq.eq(dictEq)(id)(addr.id);
+                  if ($35) {
+                      return new Data_Maybe.Just(true);
+                  };
+                  return Data_Maybe.Nothing.value;
+              };
+              var bar = function (leftText) {
+                  return function (rightText) {
+                      return function (rightColor) {
+                          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(itemClass), Yzmall_Utils.style("font-size: 15px; margin-bottom: 1px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRow)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.alignItemsCenter))))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.style("min-width: 32px;") ])([ Halogen_HTML_Core.text(leftText) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto), Yzmall_Utils.style("color: " + rightColor) ])([ Halogen_HTML_Core.text(rightText) ]) ]) ]);
+                      };
+                  };
+              };
+              return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroup)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb3)(Halogen_Themes_Bootstrap4.mxAuto))) ])([ bar("\u662f\u5426\u9ed8\u8ba4\u5730\u5740")((function () {
+                  var $36 = Data_Eq.eq(Data_Maybe.eqMaybe(Data_Eq.eqBoolean))(new Data_Maybe.Just(true))(Control_Bind.bindFlipped(Data_Maybe.bindMaybe)(isDefault)(mbAddrId));
+                  if ($36) {
+                      return "\u9ed8\u8ba4";
+                  };
+                  return "\u975e\u9ed8\u8ba4";
+              })())("#B6F9FF"), bar("\u8054\u7cfb\u4eba")(addr.name)("#ffffff"), bar("\u5730\u5740")(addr.address)("#ffffff"), bar("\u7535\u8bdd")(addr.phone)("#ffffff") ]);
+          };
+      };
+  };
+  var renderBarInput = function (name) {
+      return function (id) {
+          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(itemClass)(Halogen_Themes_Bootstrap4.py3)), Yzmall_Utils.style("font-size: 15px; margin-bottom: 1.5px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.row)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRow)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.alignItemsCenter))))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col5)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd3)(Halogen_Themes_Bootstrap4.mrAuto))) ])([ Halogen_HTML_Core.text(name) ]), Halogen_HTML_Elements.input([ Yzmall_Utils.attr_("type")("text"), Yzmall_Utils.attr_("id")(id), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.formControl)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.bgTransparent)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.p0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mlAuto)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col7)(Halogen_Themes_Bootstrap4.colMd4)))))), Yzmall_Utils.style("border-color: #929292; " + (Yzmall_Page_Utils.lightYellowColor + "; height: 30px;")) ]) ]) ]);
+      };
+  };
+  var eqAddBtnState = new Data_Eq.Eq(function (x) {
+      return function (y) {
+          if (x instanceof Uploading && y instanceof Uploading) {
+              return true;
+          };
+          if (x instanceof OJBK && y instanceof OJBK) {
+              return true;
+          };
+          return false;
+      };
+  });
+  var checkEmpty = function (v) {
+      return function (v1) {
+          if (v1 === "") {
+              return Data_Either.Left.create(v + "\u4e0d\u53ef\u4e3a\u7a7a");
+          };
+          return new Data_Either.Right(v1);
+      };
+  };
+  var addParams = function (name) {
+      return function (address) {
+          return function (phone) {
+              return function (setDefault) {
+                  return {
+                      name: name,
+                      address: address,
+                      phone: phone,
+                      setDefault: setDefault
+                  };
+              };
+          };
+      };
+  };
+  var component = function (dictMonadAff) {
+      return function (dictManageCommodity) {
+          return function (dictManageAccount) {
+              return function (dictManageOrder) {
+                  return function (dictManageAddress) {
+                      return function (dictMonadAsk) {
+                          return function (dictNavigate) {
+                              var render = function (state) {
+                                  var mbAddresses = Data_Lens_Fold.preview(Network_RemoteData._Success(Data_Lens_Internal_Forget.choiceForget(Data_Maybe_First.monoidFirst)))(state.addresses);
+                                  var mbAddrId = Control_Bind.bindFlipped(Data_Maybe.bindMaybe)(function (v) {
+                                      return v.defaultAddress;
+                                  })(state.currentAccount);
+                                  return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Halogen_HTML.slot(Data_Unit.unit)(Yzmall_Page_Part_Navbar.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageAccount))({
+                                      page: Yzmall_Page_Part_Navbar.Fourth.value
+                                  })(Data_Void.absurd), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.mt3)))), Yzmall_Utils.style("min-height: 633px") ])(Data_Semigroup.append(Data_Semigroup.semigroupArray)([ renderBarInput("\u8054\u7cfb\u4eba\u59d3\u540d")("address_name"), renderBarInput("\u5730\u5740")("address_address"), renderBarInput("\u7535\u8bdd")("address_phone"), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(itemClass)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.py3)(Halogen_Themes_Bootstrap4.mb3))), Yzmall_Utils.style("font-size: 15px; margin-bottom: 1.5px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.row)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRow)(Halogen_Themes_Bootstrap4.w100)))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col5)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd4)(Halogen_Themes_Bootstrap4.mrAuto))) ])([ Halogen_HTML_Core.text("\u662f\u5426\u9ed8\u8ba4\u5730\u5740") ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.bgTransparent)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.p0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mlAuto)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col7)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd4)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.justifyContentEnd))))))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.formCheck)(Halogen_Themes_Bootstrap4.formCheckInline)) ])([ Halogen_HTML_Elements.input([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formCheckInput), Yzmall_Utils.attr_("type")("radio"), Yzmall_Utils.attr_("name")("inlineRadioOptions"), Yzmall_Utils.attr_("id")("notDefault"), Yzmall_Utils.attr_("value")("option1") ]), Halogen_HTML_Elements.label([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formCheckLabel), Yzmall_Utils.attr_("for")("notDefault") ])([ Halogen_HTML_Core.text("\u4e0d\u9ed8\u8ba4") ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.formCheck)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.formCheckInline)(Halogen_Themes_Bootstrap4.mr0))) ])([ Halogen_HTML_Elements.input([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formCheckInput), Yzmall_Utils.attr_("type")("radio"), Yzmall_Utils.attr_("name")("inlineRadioOptions"), Yzmall_Utils.attr_("id")("default"), Yzmall_Utils.attr_("value")("option2"), Yzmall_Utils.attr_("checked")("true") ]), Halogen_HTML_Elements.label([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formCheckLabel), Yzmall_Utils.attr_("for")("default") ])([ Halogen_HTML_Core.text("\u9ed8\u8ba4") ]) ]) ]) ]) ]), Halogen_HTML_Elements.button([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(itemClass)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb3)(Halogen_Themes_Bootstrap4.btn))), Halogen_HTML_Events.onClick(Halogen_HTML_Events.input_(AddAddress.create)), Yzmall_Utils.style("font-size: 15px; height: 50px"), Halogen_HTML_Properties.disabled(Data_Eq.eq(eqAddBtnState)(state.addBtnState)(Uploading.value)) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.myAuto)), Yzmall_Utils.style(Yzmall_Page_Utils.lightBlueColor) ])((function () {
+                                      if (state.addBtnState instanceof OJBK) {
+                                          return [ Halogen_HTML_Core.text("\u786e\u8ba4\u63d0\u4ea4") ];
+                                      };
+                                      if (state.addBtnState instanceof Uploading) {
+                                          return [ Halogen_HTML_Elements.span([ Yzmall_Utils.cls("spinner-border spinner-border-sm"), Yzmall_Utils.attr_("role")("status") ])([  ]), Halogen_HTML_Core.text("\u63d0\u4ea4\u4e2d...") ];
+                                      };
+                                      throw new Error("Failed pattern match at Yzmall.Page.AddressEditor line 206, column 17 - line 215, column 22: " + [ state.addBtnState.constructor.name ]);
+                                  })()) ]) ])(Conduit_Component_Utils.maybeElemArray(mbAddresses)(Data_Functor.map(Data_Functor.functorArray)(renderAddress(Data_Eq.eqInt)(mbAddrId))))), Yzmall_Utils.renderFooter, Yzmall_Page_Part_MobileMenu.mobileMenu(Yzmall_Page_Part_Navbar.Fourth.value), Yzmall_Page_Part_MobileMenu.forMobileMenu ]);
+                              };
+                              var initialState = function (v) {
+                                  return {
+                                      addresses: Network_RemoteData.NotAsked.value,
+                                      currentAccount: Data_Maybe.Nothing.value,
+                                      addBtnState: OJBK.value
+                                  };
+                              };
+                              var $$eval = function (v) {
+                                  if (v instanceof Initialize) {
+                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Conduit_Component_Utils.guardAccount(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk))(Yzmall_Capability_Navigate.navigateHalogenM(dictNavigate)))(function (v1) {
+                                          if (v1 instanceof Data_Maybe.Nothing) {
+                                              return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                          };
+                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v2) {
+                                              var $44 = {};
+                                              for (var $45 in v2) {
+                                                  if ({}.hasOwnProperty.call(v2, $45)) {
+                                                      $44[$45] = v2[$45];
+                                                  };
+                                              };
+                                              $44.currentAccount = v1;
+                                              return $44;
+                                          }))(function () {
+                                              return Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new GetAddresses(v.value0))));
+                                          });
+                                      }))(function () {
+                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                      });
+                                  };
+                                  if (v instanceof GetAddresses) {
+                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify(Halogen_Query_HalogenM.monadStateHalogenM)(function (v1) {
+                                          var $48 = {};
+                                          for (var $49 in v1) {
+                                              if ({}.hasOwnProperty.call(v1, $49)) {
+                                                  $48[$49] = v1[$49];
+                                              };
+                                          };
+                                          $48.addresses = Network_RemoteData.Loading.value;
+                                          return $48;
+                                      }))(function (v1) {
+                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Address.myAddresses(Yzmall_Api_Capablity_Resource_Address.manageAddressHalogenM(dictManageAddress)))(function (v2) {
+                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v3) {
+                                                  var $53 = {};
+                                                  for (var $54 in v3) {
+                                                      if ({}.hasOwnProperty.call(v3, $54)) {
+                                                          $53[$54] = v3[$54];
+                                                      };
+                                                  };
+                                                  $53.addresses = Network_RemoteData.fromMaybe(v2);
+                                                  return $53;
+                                              }))(function () {
+                                                  return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                              });
+                                          });
+                                      });
+                                  };
+                                  if (v instanceof AddAddress) {
+                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.get(Halogen_Query_HalogenM.monadStateHalogenM))(function (v1) {
+                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("address_name")))(function (v2) {
+                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("address_phone")))(function (v3) {
+                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("address_address")))(function (v4) {
+                                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getRadioBtnChecked("default")))(function (v5) {
+                                                          var check = Control_Apply.apply(Data_Either.applyEither)(Control_Apply.apply(Data_Either.applyEither)(Control_Apply.apply(Data_Either.applyEither)(Data_Functor.map(Data_Either.functorEither)(addParams)(checkEmpty("\u8054\u7cfb\u4eba\u59d3\u540d")(v2)))(checkEmpty("\u5730\u5740")(v4)))(checkEmpty("\u7535\u8bdd")(v3)))(new Data_Either.Right(v5));
+                                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)((function () {
+                                                              if (check instanceof Data_Either.Left) {
+                                                                  return Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.alertMsg(check.value0));
+                                                              };
+                                                              if (check instanceof Data_Either.Right) {
+                                                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v6) {
+                                                                      var $64 = {};
+                                                                      for (var $65 in v6) {
+                                                                          if ({}.hasOwnProperty.call(v6, $65)) {
+                                                                              $64[$65] = v6[$65];
+                                                                          };
+                                                                      };
+                                                                      $64.addBtnState = Uploading.value;
+                                                                      return $64;
+                                                                  }))(function () {
+                                                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Address.addAddress(Yzmall_Api_Capablity_Resource_Address.manageAddressHalogenM(dictManageAddress))(check.value0))(function (v6) {
+                                                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v7) {
+                                                                              var $68 = {};
+                                                                              for (var $69 in v7) {
+                                                                                  if ({}.hasOwnProperty.call(v7, $69)) {
+                                                                                      $68[$69] = v7[$69];
+                                                                                  };
+                                                                              };
+                                                                              $68.addBtnState = OJBK.value;
+                                                                              return $68;
+                                                                          }))(function () {
+                                                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new GetAddresses(v.value0)))))(function () {
+                                                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Account.getAccountInfo(Yzmall_Api_Capablity_Resource_Account.manageAccountHalogenM(dictManageAccount)))(function (v7) {
+                                                                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_Reader_Class.ask(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk)))(function (v8) {
+                                                                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Effect_Ref.write(v7)(v8.currentAccount)))(function () {
+                                                                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v9) {
+                                                                                                  var $73 = {};
+                                                                                                  for (var $74 in v9) {
+                                                                                                      if ({}.hasOwnProperty.call(v9, $74)) {
+                                                                                                          $73[$74] = v9[$74];
+                                                                                                      };
+                                                                                                  };
+                                                                                                  $73.currentAccount = v7;
+                                                                                                  return $73;
+                                                                                              }))(function () {
+                                                                                                  return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Yzmall_Page_Utils.unsafeAlert("\u5730\u5740\u6dfb\u52a0\u6210\u529f"));
+                                                                                              });
+                                                                                          });
+                                                                                      });
+                                                                                  });
+                                                                              });
+                                                                          });
+                                                                      });
+                                                                  });
+                                                              };
+                                                              throw new Error("Failed pattern match at Yzmall.Page.AddressEditor line 111, column 11 - line 124, column 11: " + [ check.constructor.name ]);
+                                                          })())(function () {
+                                                              return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                                          });
+                                                      });
+                                                  });
+                                              });
+                                          });
+                                      });
+                                  };
+                                  if (v instanceof DeleteAddress) {
+                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Yzmall_Api_Capablity_Resource_Address.deleteAddress(Yzmall_Api_Capablity_Resource_Address.manageAddressHalogenM(dictManageAddress))(Yzmall_Utils.unsafeSlug(Data_Show.show(Data_Show.showInt)(v.value0)))))(function () {
+                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new GetAddresses(v.value1)))))(function () {
+                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Account.getAccountInfo(Yzmall_Api_Capablity_Resource_Account.manageAccountHalogenM(dictManageAccount)))(function (v1) {
+                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_Reader_Class.ask(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk)))(function (v2) {
+                                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Effect_Ref.write(v1)(v2.currentAccount)))(function () {
+                                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v3) {
+                                                              var $81 = {};
+                                                              for (var $82 in v3) {
+                                                                  if ({}.hasOwnProperty.call(v3, $82)) {
+                                                                      $81[$82] = v3[$82];
+                                                                  };
+                                                              };
+                                                              $81.currentAccount = v1;
+                                                              return $81;
+                                                          }))(function () {
+                                                              var sth = Yzmall_Page_Utils.unsafeAlert("\u5730\u5740\u5220\u9664\u6210\u529f");
+                                                              return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value1);
+                                                          });
+                                                      });
+                                                  });
+                                              });
+                                          });
+                                      });
+                                  };
+                                  throw new Error("Failed pattern match at Yzmall.Page.AddressEditor line 87, column 14 - line 134, column 17: " + [ v.constructor.name ]);
+                              };
+                              return Halogen_Component.lifecycleParentComponent(Data_Ord.ordUnit)({
+                                  initialState: initialState,
+                                  render: render,
+                                  "eval": $$eval,
+                                  receiver: Data_Function["const"](Data_Maybe.Nothing.value),
+                                  initializer: Data_Maybe.Just.create(Halogen_Query.action(Initialize.create)),
+                                  finalizer: Data_Maybe.Nothing.value
+                              });
+                          };
+                      };
+                  };
+              };
+          };
+      };
+  };
+  exports["Uploading"] = Uploading;
+  exports["OJBK"] = OJBK;
+  exports["Initialize"] = Initialize;
+  exports["GetAddresses"] = GetAddresses;
+  exports["AddAddress"] = AddAddress;
+  exports["DeleteAddress"] = DeleteAddress;
+  exports["component"] = component;
+  exports["itemClass"] = itemClass;
+  exports["renderBarInput"] = renderBarInput;
+  exports["renderAddress"] = renderAddress;
+  exports["checkEmpty"] = checkEmpty;
+  exports["addParams"] = addParams;
+  exports["eqAddBtnState"] = eqAddBtnState;
+})(PS["Yzmall.Page.AddressEditor"] = PS["Yzmall.Page.AddressEditor"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Conduit_Component_Utils = PS["Conduit.Component.Utils"];
+  var Control_Applicative = PS["Control.Applicative"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Monad_Reader = PS["Control.Monad.Reader"];
+  var Control_Monad_Reader_Class = PS["Control.Monad.Reader.Class"];
+  var Control_Monad_State_Class = PS["Control.Monad.State.Class"];
+  var Data_Either = PS["Data.Either"];
+  var Data_Eq = PS["Data.Eq"];
+  var Data_Function = PS["Data.Function"];
+  var Data_Functor = PS["Data.Functor"];
+  var Data_Lens = PS["Data.Lens"];
+  var Data_Lens_Fold = PS["Data.Lens.Fold"];
+  var Data_Lens_Internal_Forget = PS["Data.Lens.Internal.Forget"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Data_Maybe_First = PS["Data.Maybe.First"];
+  var Data_Ord = PS["Data.Ord"];
+  var Data_Semigroup = PS["Data.Semigroup"];
+  var Data_Tuple = PS["Data.Tuple"];
+  var Data_Unit = PS["Data.Unit"];
+  var Data_Void = PS["Data.Void"];
+  var Effect_Aff_Class = PS["Effect.Aff.Class"];
+  var Effect_Class = PS["Effect.Class"];
+  var Effect_Ref = PS["Effect.Ref"];
+  var Effect_Unsafe = PS["Effect.Unsafe"];
+  var Halogen = PS["Halogen"];
+  var Halogen_Component = PS["Halogen.Component"];
+  var Halogen_HTML = PS["Halogen.HTML"];
+  var Halogen_HTML_Core = PS["Halogen.HTML.Core"];
+  var Halogen_HTML_Elements = PS["Halogen.HTML.Elements"];
+  var Halogen_HTML_Events = PS["Halogen.HTML.Events"];
+  var Halogen_HTML_Properties = PS["Halogen.HTML.Properties"];
+  var Halogen_Query = PS["Halogen.Query"];
+  var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
+  var Halogen_Themes_Bootstrap4 = PS["Halogen.Themes.Bootstrap4"];
+  var Network_RemoteData = PS["Network.RemoteData"];
+  var Partial_Unsafe = PS["Partial.Unsafe"];
+  var Prelude = PS["Prelude"];
+  var $$String = PS["String"];
+  var Web_HTML_HTMLInputElement = PS["Web.HTML.HTMLInputElement"];
+  var Yzmall_Api_Capablity_Resource_Account = PS["Yzmall.Api.Capablity.Resource.Account"];
+  var Yzmall_Api_Capablity_Resource_Address = PS["Yzmall.Api.Capablity.Resource.Address"];
+  var Yzmall_Api_Capablity_Resource_CommodityOrder = PS["Yzmall.Api.Capablity.Resource.CommodityOrder"];
+  var Yzmall_Capability_Navigate = PS["Yzmall.Capability.Navigate"];
+  var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
+  var Yzmall_Data_Address = PS["Yzmall.Data.Address"];
+  var Yzmall_Data_Route = PS["Yzmall.Data.Route"];
+  var Yzmall_Page_Part_Login = PS["Yzmall.Page.Part.Login"];
+  var Yzmall_Page_Part_MobileMenu = PS["Yzmall.Page.Part.MobileMenu"];
+  var Yzmall_Page_Part_Navbar = PS["Yzmall.Page.Part.Navbar"];
+  var Yzmall_Page_Utils = PS["Yzmall.Page.Utils"];
+  var Yzmall_Resource_Commodity = PS["Yzmall.Resource.Commodity"];
+  var Yzmall_Utils = PS["Yzmall.Utils"];                 
+  var Initialize = (function () {
+      function Initialize(value0) {
+          this.value0 = value0;
+      };
+      Initialize.create = function (value0) {
+          return new Initialize(value0);
+      };
+      return Initialize;
+  })();
+  var GetAddresses = (function () {
+      function GetAddresses(value0) {
+          this.value0 = value0;
+      };
+      GetAddresses.create = function (value0) {
+          return new GetAddresses(value0);
+      };
+      return GetAddresses;
+  })();
+  var SelectAddress = (function () {
+      function SelectAddress(value0, value1) {
+          this.value0 = value0;
+          this.value1 = value1;
+      };
+      SelectAddress.create = function (value0) {
+          return function (value1) {
+              return new SelectAddress(value0, value1);
+          };
+      };
+      return SelectAddress;
+  })();
+  var itemClass = Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItem)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.rounded0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemDark)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemAction)(Halogen_Themes_Bootstrap4.textWhite)))))));
+  var renderAddress = function (mbAddrId) {
+      return function (addr) {
+          var isDefault = function (id) {
+              var $18 = id === addr.id;
+              if ($18) {
+                  return new Data_Maybe.Just(true);
+              };
+              return Data_Maybe.Nothing.value;
+          };
+          var bar = function (leftText) {
+              return function (rightText) {
+                  return function (rightColor) {
+                      return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(itemClass), Yzmall_Utils.style("font-size: 15px; margin-bottom: 1px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRow)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.alignItemsCenter))))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.style("min-width: 32px;") ])([ Halogen_HTML_Core.text(leftText) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto), Yzmall_Utils.style("color: " + rightColor) ])([ Halogen_HTML_Core.text(rightText) ]) ]) ]);
+                  };
+              };
+          };
+          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroup)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb3)(Halogen_Themes_Bootstrap4.mxAuto))) ])([ bar("\u662f\u5426\u9ed8\u8ba4\u5730\u5740")((function () {
+              var $19 = Data_Eq.eq(Data_Maybe.eqMaybe(Data_Eq.eqBoolean))(new Data_Maybe.Just(true))(Control_Bind.bindFlipped(Data_Maybe.bindMaybe)(isDefault)(mbAddrId));
+              if ($19) {
+                  return "\u9ed8\u8ba4";
+              };
+              return "\u975e\u9ed8\u8ba4";
+          })())("#B6F9FF"), bar("\u8054\u7cfb\u4eba")(addr.name)("#ffffff"), bar("\u5730\u5740")(addr.address)("#ffffff"), bar("\u7535\u8bdd")(addr.phone)("#ffffff"), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(itemClass)(Halogen_Themes_Bootstrap4.btn)), Yzmall_Utils.style("font-size: 15px; margin-bottom: 1px"), Halogen_HTML_Events.onClick(Halogen_HTML_Events.input_(SelectAddress.create(addr.id))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRow)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.alignItemsCenter))))) ])([ Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text("\u64cd\u4f5c") ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto), Yzmall_Utils.style("color: #F05451") ])([ Halogen_HTML_Core.text("[\u4f7f\u7528\u8be5\u5730\u5740]") ]) ]) ]) ]);
+      };
+  };
+  var component = function (dictMonadAff) {
+      return function (dictManageCommodity) {
+          return function (dictManageAccount) {
+              return function (dictManageOrder) {
+                  return function (dictManageAddress) {
+                      return function (dictMonadAsk) {
+                          return function (dictNavigate) {
+                              var render = function (state) {
+                                  var mbAddresses = Data_Lens_Fold.preview(Network_RemoteData._Success(Data_Lens_Internal_Forget.choiceForget(Data_Maybe_First.monoidFirst)))(state.addresses);
+                                  var mbAddrId = Control_Bind.bindFlipped(Data_Maybe.bindMaybe)(function (v) {
+                                      return v.defaultAddress;
+                                  })(state.currentAccount);
+                                  return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Halogen_HTML.slot(Data_Unit.unit)(Yzmall_Page_Part_Navbar.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageAccount))({
+                                      page: Yzmall_Page_Part_Navbar.Fourth.value
+                                  })(Data_Void.absurd), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.mt3)))), Yzmall_Utils.style("min-height: 633px") ])(Conduit_Component_Utils.maybeElemArray(mbAddresses)(Data_Functor.map(Data_Functor.functorArray)(renderAddress(mbAddrId)))), Yzmall_Utils.renderFooter, Yzmall_Page_Part_MobileMenu.mobileMenu(Yzmall_Page_Part_Navbar.Fourth.value), Yzmall_Page_Part_MobileMenu.forMobileMenu ]);
+                              };
+                              var initialState = function (v) {
+                                  return {
+                                      addresses: Network_RemoteData.NotAsked.value,
+                                      currentAccount: Data_Maybe.Nothing.value
+                                  };
+                              };
+                              var $$eval = function (v) {
+                                  if (v instanceof Initialize) {
+                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Conduit_Component_Utils.guardAccount(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk))(Yzmall_Capability_Navigate.navigateHalogenM(dictNavigate)))(function (v1) {
+                                          if (v1 instanceof Data_Maybe.Nothing) {
+                                              return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                          };
+                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v2) {
+                                              var $22 = {};
+                                              for (var $23 in v2) {
+                                                  if ({}.hasOwnProperty.call(v2, $23)) {
+                                                      $22[$23] = v2[$23];
+                                                  };
+                                              };
+                                              $22.currentAccount = v1;
+                                              return $22;
+                                          }))(function () {
+                                              return Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new GetAddresses(v.value0))));
+                                          });
+                                      }))(function () {
+                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                      });
+                                  };
+                                  if (v instanceof GetAddresses) {
+                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify(Halogen_Query_HalogenM.monadStateHalogenM)(function (v1) {
+                                          var $26 = {};
+                                          for (var $27 in v1) {
+                                              if ({}.hasOwnProperty.call(v1, $27)) {
+                                                  $26[$27] = v1[$27];
+                                              };
+                                          };
+                                          $26.addresses = Network_RemoteData.Loading.value;
+                                          return $26;
+                                      }))(function (v1) {
+                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Address.myAddresses(Yzmall_Api_Capablity_Resource_Address.manageAddressHalogenM(dictManageAddress)))(function (v2) {
+                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v3) {
+                                                  var $31 = {};
+                                                  for (var $32 in v3) {
+                                                      if ({}.hasOwnProperty.call(v3, $32)) {
+                                                          $31[$32] = v3[$32];
+                                                      };
+                                                  };
+                                                  $31.addresses = Network_RemoteData.fromMaybe(v2);
+                                                  return $31;
+                                              }))(function () {
+                                                  return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                              });
+                                          });
+                                      });
+                                  };
+                                  if (v instanceof SelectAddress) {
+                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_Reader_Class.ask(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk)))(function (v1) {
+                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Effect_Ref.write(new Data_Maybe.Just(v.value0))(v1.currentAddressId)))(function () {
+                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Effect_Ref.read(v1.lastRoute)))(function (v2) {
+                                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)((function () {
+                                                      if (v2 instanceof Data_Maybe.Just) {
+                                                          return Yzmall_Capability_Navigate.navigate(Yzmall_Capability_Navigate.navigateHalogenM(dictNavigate))(v2.value0);
+                                                      };
+                                                      if (v2 instanceof Data_Maybe.Nothing) {
+                                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                                      };
+                                                      throw new Error("Failed pattern match at Yzmall.Page.AddressSelector line 96, column 11 - line 100, column 24: " + [ v2.constructor.name ]);
+                                                  })())(function () {
+                                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value1);
+                                                  });
+                                              });
+                                          });
+                                      });
+                                  };
+                                  throw new Error("Failed pattern match at Yzmall.Page.AddressSelector line 79, column 14 - line 101, column 17: " + [ v.constructor.name ]);
+                              };
+                              return Halogen_Component.lifecycleParentComponent(Data_Ord.ordUnit)({
+                                  initialState: initialState,
+                                  render: render,
+                                  "eval": $$eval,
+                                  receiver: Data_Function["const"](Data_Maybe.Nothing.value),
+                                  initializer: Data_Maybe.Just.create(Halogen_Query.action(Initialize.create)),
+                                  finalizer: Data_Maybe.Nothing.value
+                              });
+                          };
+                      };
+                  };
+              };
+          };
+      };
+  };
+  exports["Initialize"] = Initialize;
+  exports["GetAddresses"] = GetAddresses;
+  exports["SelectAddress"] = SelectAddress;
+  exports["component"] = component;
+  exports["itemClass"] = itemClass;
+  exports["renderAddress"] = renderAddress;
+})(PS["Yzmall.Page.AddressSelector"] = PS["Yzmall.Page.AddressSelector"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Conduit_Component_Utils = PS["Conduit.Component.Utils"];
+  var Control_Applicative = PS["Control.Applicative"];
+  var Control_Apply = PS["Control.Apply"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Monad_Reader = PS["Control.Monad.Reader"];
+  var Control_Monad_Reader_Class = PS["Control.Monad.Reader.Class"];
+  var Control_Monad_State_Class = PS["Control.Monad.State.Class"];
+  var Data_Either = PS["Data.Either"];
+  var Data_Eq = PS["Data.Eq"];
+  var Data_Function = PS["Data.Function"];
+  var Data_Functor = PS["Data.Functor"];
+  var Data_Lens = PS["Data.Lens"];
+  var Data_Lens_Fold = PS["Data.Lens.Fold"];
+  var Data_Lens_Internal_Forget = PS["Data.Lens.Internal.Forget"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Data_Maybe_First = PS["Data.Maybe.First"];
+  var Data_Ord = PS["Data.Ord"];
+  var Data_Semigroup = PS["Data.Semigroup"];
+  var Data_Show = PS["Data.Show"];
+  var Data_Tuple = PS["Data.Tuple"];
+  var Data_Unit = PS["Data.Unit"];
+  var Data_Void = PS["Data.Void"];
+  var Effect_Aff_Class = PS["Effect.Aff.Class"];
+  var Effect_Class = PS["Effect.Class"];
+  var Effect_Ref = PS["Effect.Ref"];
+  var Effect_Unsafe = PS["Effect.Unsafe"];
+  var Halogen = PS["Halogen"];
+  var Halogen_Component = PS["Halogen.Component"];
+  var Halogen_HTML = PS["Halogen.HTML"];
+  var Halogen_HTML_Core = PS["Halogen.HTML.Core"];
+  var Halogen_HTML_Elements = PS["Halogen.HTML.Elements"];
+  var Halogen_HTML_Events = PS["Halogen.HTML.Events"];
+  var Halogen_HTML_Properties = PS["Halogen.HTML.Properties"];
+  var Halogen_Query = PS["Halogen.Query"];
+  var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
+  var Halogen_Themes_Bootstrap4 = PS["Halogen.Themes.Bootstrap4"];
+  var Network_RemoteData = PS["Network.RemoteData"];
+  var Partial_Unsafe = PS["Partial.Unsafe"];
+  var Prelude = PS["Prelude"];
+  var $$String = PS["String"];
+  var Web_HTML_HTMLInputElement = PS["Web.HTML.HTMLInputElement"];
+  var Yzmall_Api_Capablity_Resource_Account = PS["Yzmall.Api.Capablity.Resource.Account"];
+  var Yzmall_Api_Capablity_Resource_Address = PS["Yzmall.Api.Capablity.Resource.Address"];
+  var Yzmall_Api_Capablity_Resource_BankCard = PS["Yzmall.Api.Capablity.Resource.BankCard"];
+  var Yzmall_Api_Capablity_Resource_CommodityOrder = PS["Yzmall.Api.Capablity.Resource.CommodityOrder"];
+  var Yzmall_Capability_Navigate = PS["Yzmall.Capability.Navigate"];
+  var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
+  var Yzmall_Data_BankCard = PS["Yzmall.Data.BankCard"];
+  var Yzmall_Data_Route = PS["Yzmall.Data.Route"];
+  var Yzmall_Page_Part_Login = PS["Yzmall.Page.Part.Login"];
+  var Yzmall_Page_Part_MobileMenu = PS["Yzmall.Page.Part.MobileMenu"];
+  var Yzmall_Page_Part_Navbar = PS["Yzmall.Page.Part.Navbar"];
+  var Yzmall_Page_Utils = PS["Yzmall.Page.Utils"];
+  var Yzmall_Resource_Commodity = PS["Yzmall.Resource.Commodity"];
+  var Yzmall_Utils = PS["Yzmall.Utils"];                 
+  var Initialize = (function () {
+      function Initialize(value0) {
+          this.value0 = value0;
+      };
+      Initialize.create = function (value0) {
+          return new Initialize(value0);
+      };
+      return Initialize;
+  })();
+  var GetBankCards = (function () {
+      function GetBankCards(value0) {
+          this.value0 = value0;
+      };
+      GetBankCards.create = function (value0) {
+          return new GetBankCards(value0);
+      };
+      return GetBankCards;
+  })();
+  var AddBankCard = (function () {
+      function AddBankCard(value0) {
+          this.value0 = value0;
+      };
+      AddBankCard.create = function (value0) {
+          return new AddBankCard(value0);
+      };
+      return AddBankCard;
+  })();
+  var DeleteBankCard = (function () {
+      function DeleteBankCard(value0, value1) {
+          this.value0 = value0;
+          this.value1 = value1;
+      };
+      DeleteBankCard.create = function (value0) {
+          return function (value1) {
+              return new DeleteBankCard(value0, value1);
+          };
+      };
+      return DeleteBankCard;
+  })();
+  var Uploading = (function () {
+      function Uploading() {
+
+      };
+      Uploading.value = new Uploading();
+      return Uploading;
+  })();
+  var OJBK = (function () {
+      function OJBK() {
+
+      };
+      OJBK.value = new OJBK();
+      return OJBK;
+  })();
+  var pleaseSelectBank = "=\u8bf7\u9009\u62e9\u5f00\u6237\u94f6\u884c=";
+  var itemClass = Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItem)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.rounded0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemDark)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemAction)(Halogen_Themes_Bootstrap4.textWhite)))))));
+  var renderBankCard = function (dictEq) {
+      return function (mbCardId) {
+          return function (card) {
+              var isDefault = function (id) {
+                  var $38 = Data_Eq.eq(dictEq)(id)(card.id);
+                  if ($38) {
+                      return new Data_Maybe.Just(true);
+                  };
+                  return Data_Maybe.Nothing.value;
+              };
+              var bar = function (leftText) {
+                  return function (rightText) {
+                      return function (rightColor) {
+                          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(itemClass), Yzmall_Utils.style("font-size: 15px; margin-bottom: 1px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRow)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.alignItemsCenter))))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.style("min-width: 32px;") ])([ Halogen_HTML_Core.text(leftText) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto), Yzmall_Utils.style("color: " + rightColor) ])([ Halogen_HTML_Core.text(rightText) ]) ]) ]);
+                      };
+                  };
+              };
+              return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroup)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb3)(Halogen_Themes_Bootstrap4.mxAuto))) ])([ bar("\u662f\u5426\u9ed8\u8ba4\u5730\u5740")((function () {
+                  var $39 = Data_Eq.eq(Data_Maybe.eqMaybe(Data_Eq.eqBoolean))(new Data_Maybe.Just(true))(Control_Bind.bindFlipped(Data_Maybe.bindMaybe)(isDefault)(mbCardId));
+                  if ($39) {
+                      return "\u9ed8\u8ba4";
+                  };
+                  return "\u975e\u9ed8\u8ba4";
+              })())("#B6F9FF"), bar("\u8d26\u6237\u59d3\u540d")(card.name)("#ffffff"), bar("\u94f6\u884c\u5361\u8d26\u6237")(card.cardId)("#ffffff"), bar("\u5f00\u6237\u884c\u5730\u533a")(card.region)("#ffffff"), bar("\u9884\u7559\u624b\u673a\u53f7")(card.phone)("#ffffff"), bar("\u5f00\u6237\u94f6\u884c")(card.bank)("#ffffff") ]);
+          };
+      };
+  };
+  var renderBarInput = function (name) {
+      return function (id) {
+          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(itemClass)(Halogen_Themes_Bootstrap4.py3)), Yzmall_Utils.style("font-size: 15px; margin-bottom: 1.5px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.row)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRow)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Halogen_Themes_Bootstrap4.mx0)))))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col5)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mrAuto)(Halogen_Themes_Bootstrap4.pl0)))) ])([ Halogen_HTML_Core.text(name) ]), Halogen_HTML_Elements.input([ Yzmall_Utils.attr_("type")("text"), Yzmall_Utils.attr_("id")(id), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.formControl)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.bgTransparent)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.p0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mlAuto)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col7)(Halogen_Themes_Bootstrap4.colMd4)))))), Yzmall_Utils.style("border-color: #929292; " + (Yzmall_Page_Utils.lightYellowColor + "; height: 30px;")) ]) ]) ]);
+      };
+  };
+  var eqAddBtnState = new Data_Eq.Eq(function (x) {
+      return function (y) {
+          if (x instanceof Uploading && y instanceof Uploading) {
+              return true;
+          };
+          if (x instanceof OJBK && y instanceof OJBK) {
+              return true;
+          };
+          return false;
+      };
+  });
+  var checkEmpty = function (v) {
+      return function (v1) {
+          if (v1 === "") {
+              return Data_Either.Left.create(v + "\u4e0d\u53ef\u4e3a\u7a7a");
+          };
+          return new Data_Either.Right(v1);
+      };
+  };
+  var addParams = function (name) {
+      return function (cardId) {
+          return function (region) {
+              return function (phone) {
+                  return function (bank) {
+                      return function (setDefault) {
+                          return {
+                              name: name,
+                              cardId: cardId,
+                              region: region,
+                              phone: phone,
+                              bank: bank,
+                              setDefault: setDefault
+                          };
+                      };
+                  };
+              };
+          };
+      };
+  };
+  var component = function (dictMonadAff) {
+      return function (dictManageCommodity) {
+          return function (dictManageAccount) {
+              return function (dictManageOrder) {
+                  return function (dictManageBankCard) {
+                      return function (dictMonadAsk) {
+                          return function (dictNavigate) {
+                              var render = function (state) {
+                                  var mbCardId = Control_Bind.bindFlipped(Data_Maybe.bindMaybe)(function (v) {
+                                      return v.defaultBankCard;
+                                  })(state.currentAccount);
+                                  var mbBankCards = Data_Lens_Fold.preview(Network_RemoteData._Success(Data_Lens_Internal_Forget.choiceForget(Data_Maybe_First.monoidFirst)))(state.bankcards);
+                                  return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Halogen_HTML.slot(Data_Unit.unit)(Yzmall_Page_Part_Navbar.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageAccount))({
+                                      page: Yzmall_Page_Part_Navbar.Fourth.value
+                                  })(Data_Void.absurd), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.mt3)))), Yzmall_Utils.style("min-height: 633px") ])(Data_Semigroup.append(Data_Semigroup.semigroupArray)([ renderBarInput("\u8d26\u6237\u59d3\u540d")("bankcard_name"), renderBarInput("\u94f6\u884c\u5361\u8d26\u6237")("bankcard_card_id"), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(itemClass)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.py3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.flexColumn)))), Yzmall_Utils.style("font-size: 15px; margin-bottom: 1.5px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.row)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mx0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRow)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.alignItemsCenter)))))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col5)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mrAuto)(Halogen_Themes_Bootstrap4.pl0)))) ])([ Halogen_HTML_Core.text("\u5f00\u6237\u94f6\u884c") ]), Halogen_HTML_Elements.select([ Yzmall_Utils.attr_("id")("bankcard_bank"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.formControl)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd4)(Halogen_Themes_Bootstrap4.col7))) ])(Data_Functor.map(Data_Functor.functorArray)(function (x) {
+                                      return Halogen_HTML_Elements.option_([ Halogen_HTML_Core.text(x) ]);
+                                  })([ pleaseSelectBank, "\u5de5\u5546\u94f6\u884c", "\u4e2d\u56fd\u94f6\u884c", "\u5174\u4e1a\u94f6\u884c", "\u4e2d\u4fe1\u94f6\u884c", "\u4e0a\u6d77\u94f6\u884c", "\u5149\u5927\u94f6\u884c", "\u6c11\u751f\u94f6\u884c", "\u5317\u4eac\u94f6\u884c", "\u5e73\u5b89\u94f6\u884c", "\u4ea4\u901a\u94f6\u884c", "\u62db\u5546\u94f6\u884c", "\u5e7f\u53d1\u94f6\u884c", "\u5efa\u8bbe\u94f6\u884c", "\u519c\u4e1a\u94f6\u884c", "\u6d66\u53d1\u94f6\u884c", "\u90ae\u50a8\u94f6\u884c", "\u6e24\u6d77\u94f6\u884c" ])) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(itemClass)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.py3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.flexColumn)))), Yzmall_Utils.style("font-size: 15px; margin-bottom: 1.5px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.row)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mx0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRow)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.alignItemsCenter)))))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col5)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mrAuto)(Halogen_Themes_Bootstrap4.pl0)))) ])([ Halogen_HTML_Core.text("\u5f00\u6237\u884c\u5730\u533a") ]), Halogen_HTML_Elements.input([ Yzmall_Utils.attr_("type")("text"), Yzmall_Utils.attr_("id")("bankcard_region"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.formControl)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.bgTransparent)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.p0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mlAuto)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col7)(Halogen_Themes_Bootstrap4.colMd4)))))), Yzmall_Utils.style("border-color: #929292; " + (Yzmall_Page_Utils.lightYellowColor + "; height: 30px;")), Halogen_HTML_Properties.readOnly(true) ]) ]), Halogen_HTML_Elements.fieldset([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.mt2)) ])([ Halogen_HTML_Elements.form([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.dFlex) ])([ Halogen_HTML_Elements.select([ Yzmall_Utils.attr_("id")("prov"), Yzmall_Utils.attr_("onchange")("showCity(this)"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.customSelect)(Halogen_Themes_Bootstrap4.mr2)) ])([ Halogen_HTML_Elements.option_([ Halogen_HTML_Core.text("=\u8bf7\u9009\u62e9\u7701\u4efd=") ]) ]), Halogen_HTML_Elements.select([ Yzmall_Utils.attr_("id")("city"), Yzmall_Utils.attr_("onchange")("showCountry(this)"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.customSelect)(Halogen_Themes_Bootstrap4.mr2)) ])([ Halogen_HTML_Elements.option_([ Halogen_HTML_Core.text("=\u8bf7\u9009\u62e9\u57ce\u5e02=") ]) ]), Halogen_HTML_Elements.select([ Yzmall_Utils.attr_("id")("country"), Yzmall_Utils.attr_("onchange")("selecCountry(this)"), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.customSelect) ])([ Halogen_HTML_Elements.option_([ Halogen_HTML_Core.text("=\u8bf7\u9009\u62e9\u53bf\u533a=") ]) ]) ]) ]) ]), renderBarInput("\u5f00\u6237\u652f\u884c(\u53ef\u9009)")("bankcard_bank_detail"), renderBarInput("\u9884\u7559\u624b\u673a\u53f7")("bankcard_phone"), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(itemClass)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.py3)(Halogen_Themes_Bootstrap4.mb3))), Yzmall_Utils.style("font-size: 15px; margin-bottom: 1.5px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.row)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRow)(Halogen_Themes_Bootstrap4.w100)))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col5)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd4)(Halogen_Themes_Bootstrap4.mrAuto))) ])([ Halogen_HTML_Core.text("\u662f\u5426\u8bbe\u7f6e\u9ed8\u8ba4") ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.bgTransparent)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.p0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mlAuto)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col7)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd4)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.justifyContentEnd))))))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.formCheck)(Halogen_Themes_Bootstrap4.formCheckInline)) ])([ Halogen_HTML_Elements.input([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formCheckInput), Yzmall_Utils.attr_("type")("radio"), Yzmall_Utils.attr_("name")("inlineRadioOptions"), Yzmall_Utils.attr_("id")("notDefault"), Yzmall_Utils.attr_("value")("option1") ]), Halogen_HTML_Elements.label([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formCheckLabel), Yzmall_Utils.attr_("for")("notDefault") ])([ Halogen_HTML_Core.text("\u4e0d\u9ed8\u8ba4") ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.formCheck)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.formCheckInline)(Halogen_Themes_Bootstrap4.mr0))) ])([ Halogen_HTML_Elements.input([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formCheckInput), Yzmall_Utils.attr_("type")("radio"), Yzmall_Utils.attr_("name")("inlineRadioOptions"), Yzmall_Utils.attr_("id")("default"), Yzmall_Utils.attr_("value")("option2"), Yzmall_Utils.attr_("checked")("true") ]), Halogen_HTML_Elements.label([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formCheckLabel), Yzmall_Utils.attr_("for")("default") ])([ Halogen_HTML_Core.text("\u9ed8\u8ba4") ]) ]) ]) ]) ]), Halogen_HTML_Elements.button([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(itemClass)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb3)(Halogen_Themes_Bootstrap4.btn))), Halogen_HTML_Events.onClick(Halogen_HTML_Events.input_(AddBankCard.create)), Yzmall_Utils.style("font-size: 15px; height: 50px"), Halogen_HTML_Properties.disabled(Data_Eq.eq(eqAddBtnState)(state.addBtnState)(Uploading.value)) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.myAuto)), Yzmall_Utils.style(Yzmall_Page_Utils.lightBlueColor) ])((function () {
+                                      if (state.addBtnState instanceof OJBK) {
+                                          return [ Halogen_HTML_Core.text("\u786e\u8ba4\u63d0\u4ea4") ];
+                                      };
+                                      if (state.addBtnState instanceof Uploading) {
+                                          return [ Halogen_HTML_Elements.span([ Yzmall_Utils.cls("spinner-border spinner-border-sm"), Yzmall_Utils.attr_("role")("status") ])([  ]), Halogen_HTML_Core.text("\u63d0\u4ea4\u4e2d...") ];
+                                      };
+                                      throw new Error("Failed pattern match at Yzmall.Page.BankCardEditor line 299, column 17 - line 308, column 22: " + [ state.addBtnState.constructor.name ]);
+                                  })()) ]) ])(Conduit_Component_Utils.maybeElemArray(mbBankCards)(Data_Functor.map(Data_Functor.functorArray)(renderBankCard(Data_Eq.eqInt)(mbCardId))))), Yzmall_Utils.renderFooter, Yzmall_Page_Part_MobileMenu.mobileMenu(Yzmall_Page_Part_Navbar.Fourth.value), Yzmall_Page_Part_MobileMenu.forMobileMenu ]);
+                              };
+                              var initialState = function (v) {
+                                  return {
+                                      bankcards: Network_RemoteData.NotAsked.value,
+                                      currentAccount: Data_Maybe.Nothing.value,
+                                      addBtnState: OJBK.value
+                                  };
+                              };
+                              var $$eval = function (v) {
+                                  if (v instanceof Initialize) {
+                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Conduit_Component_Utils.guardAccount(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk))(Yzmall_Capability_Navigate.navigateHalogenM(dictNavigate)))(function (v1) {
+                                          if (v1 instanceof Data_Maybe.Nothing) {
+                                              return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                          };
+                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.showProv))(function () {
+                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v2) {
+                                                  var $47 = {};
+                                                  for (var $48 in v2) {
+                                                      if ({}.hasOwnProperty.call(v2, $48)) {
+                                                          $47[$48] = v2[$48];
+                                                      };
+                                                  };
+                                                  $47.currentAccount = v1;
+                                                  return $47;
+                                              }))(function () {
+                                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new GetBankCards(v.value0)))))(function () {
+                                                      return Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.setNumOnly("bankcard_card_id"));
+                                                  });
+                                              });
+                                          });
+                                      }))(function () {
+                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                      });
+                                  };
+                                  if (v instanceof GetBankCards) {
+                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify(Halogen_Query_HalogenM.monadStateHalogenM)(function (v1) {
+                                          var $51 = {};
+                                          for (var $52 in v1) {
+                                              if ({}.hasOwnProperty.call(v1, $52)) {
+                                                  $51[$52] = v1[$52];
+                                              };
+                                          };
+                                          $51.bankcards = Network_RemoteData.Loading.value;
+                                          return $51;
+                                      }))(function (v1) {
+                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_BankCard.myBankCards(Yzmall_Api_Capablity_Resource_BankCard.manageBankCardHalogenM(dictManageBankCard)))(function (v2) {
+                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v3) {
+                                                  var $56 = {};
+                                                  for (var $57 in v3) {
+                                                      if ({}.hasOwnProperty.call(v3, $57)) {
+                                                          $56[$57] = v3[$57];
+                                                      };
+                                                  };
+                                                  $56.bankcards = Network_RemoteData.fromMaybe(v2);
+                                                  return $56;
+                                              }))(function () {
+                                                  return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                              });
+                                          });
+                                      });
+                                  };
+                                  if (v instanceof AddBankCard) {
+                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.get(Halogen_Query_HalogenM.monadStateHalogenM))(function (v1) {
+                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("bankcard_name")))(function (v2) {
+                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("bankcard_card_id")))(function (v3) {
+                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("bankcard_region")))(function (v4) {
+                                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("bankcard_phone")))(function (v5) {
+                                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("bankcard_bank")))(function (v6) {
+                                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getRadioBtnChecked("default")))(function (v7) {
+                                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("bankcard_bank_detail")))(function (v8) {
+                                                                      var regionAll = (function () {
+                                                                          var $68 = v8 === "";
+                                                                          if ($68) {
+                                                                              return v4;
+                                                                          };
+                                                                          return v4 + ("-" + v8);
+                                                                      })();
+                                                                      var bankReal = (function () {
+                                                                          var $69 = v6 === pleaseSelectBank;
+                                                                          if ($69) {
+                                                                              return "";
+                                                                          };
+                                                                          return v6;
+                                                                      })();
+                                                                      var check = Control_Apply.apply(Data_Either.applyEither)(Control_Apply.apply(Data_Either.applyEither)(Control_Apply.apply(Data_Either.applyEither)(Control_Apply.apply(Data_Either.applyEither)(Control_Apply.apply(Data_Either.applyEither)(Data_Functor.map(Data_Either.functorEither)(addParams)(checkEmpty("\u8d26\u6237\u59d3\u540d")(v2)))(checkEmpty("\u94f6\u884c\u5361\u8d26\u6237")(v3)))(checkEmpty("\u5f00\u6237\u884c\u5730\u533a")(regionAll)))(checkEmpty("\u9884\u7559\u624b\u673a\u53f7")(v5)))(checkEmpty("\u5f00\u6237\u94f6\u884c")(bankReal)))(new Data_Either.Right(v7));
+                                                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)((function () {
+                                                                          if (check instanceof Data_Either.Left) {
+                                                                              return Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.alertMsg(check.value0));
+                                                                          };
+                                                                          if (check instanceof Data_Either.Right) {
+                                                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v9) {
+                                                                                  var $72 = {};
+                                                                                  for (var $73 in v9) {
+                                                                                      if ({}.hasOwnProperty.call(v9, $73)) {
+                                                                                          $72[$73] = v9[$73];
+                                                                                      };
+                                                                                  };
+                                                                                  $72.addBtnState = Uploading.value;
+                                                                                  return $72;
+                                                                              }))(function () {
+                                                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_BankCard.addBankCard(Yzmall_Api_Capablity_Resource_BankCard.manageBankCardHalogenM(dictManageBankCard))(check.value0))(function (v9) {
+                                                                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)((function () {
+                                                                                          if (v9 instanceof Data_Maybe.Just) {
+                                                                                              return Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.alertMsg("\u94f6\u884c\u5361\u7ed1\u5b9a\u6210\u529f"));
+                                                                                          };
+                                                                                          if (v9 instanceof Data_Maybe.Nothing) {
+                                                                                              return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                                                                          };
+                                                                                          throw new Error("Failed pattern match at Yzmall.Page.BankCardEditor line 128, column 15 - line 130, column 37: " + [ v9.constructor.name ]);
+                                                                                      })())(function () {
+                                                                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v10) {
+                                                                                              var $78 = {};
+                                                                                              for (var $79 in v10) {
+                                                                                                  if ({}.hasOwnProperty.call(v10, $79)) {
+                                                                                                      $78[$79] = v10[$79];
+                                                                                                  };
+                                                                                              };
+                                                                                              $78.addBtnState = OJBK.value;
+                                                                                              return $78;
+                                                                                          }))(function () {
+                                                                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new GetBankCards(v.value0)))))(function () {
+                                                                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Account.getAccountInfo(Yzmall_Api_Capablity_Resource_Account.manageAccountHalogenM(dictManageAccount)))(function (v10) {
+                                                                                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_Reader_Class.ask(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk)))(function (v11) {
+                                                                                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Effect_Ref.write(v10)(v11.currentAccount)))(function () {
+                                                                                                              return Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v12) {
+                                                                                                                  var $83 = {};
+                                                                                                                  for (var $84 in v12) {
+                                                                                                                      if ({}.hasOwnProperty.call(v12, $84)) {
+                                                                                                                          $83[$84] = v12[$84];
+                                                                                                                      };
+                                                                                                                  };
+                                                                                                                  $83.currentAccount = v10;
+                                                                                                                  return $83;
+                                                                                                              });
+                                                                                                          });
+                                                                                                      });
+                                                                                                  });
+                                                                                              });
+                                                                                          });
+                                                                                      });
+                                                                                  });
+                                                                              });
+                                                                          };
+                                                                          throw new Error("Failed pattern match at Yzmall.Page.BankCardEditor line 122, column 11 - line 136, column 55: " + [ check.constructor.name ]);
+                                                                      })())(function () {
+                                                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                                                      });
+                                                                  });
+                                                              });
+                                                          });
+                                                      });
+                                                  });
+                                              });
+                                          });
+                                      });
+                                  };
+                                  if (v instanceof DeleteBankCard) {
+                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Yzmall_Api_Capablity_Resource_BankCard.deleteBankCard(Yzmall_Api_Capablity_Resource_BankCard.manageBankCardHalogenM(dictManageBankCard))(Yzmall_Utils.unsafeSlug(Data_Show.show(Data_Show.showInt)(v.value0)))))(function () {
+                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new GetBankCards(v.value1)))))(function () {
+                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Account.getAccountInfo(Yzmall_Api_Capablity_Resource_Account.manageAccountHalogenM(dictManageAccount)))(function (v1) {
+                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_Reader_Class.ask(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk)))(function (v2) {
+                                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Effect_Ref.write(v1)(v2.currentAccount)))(function () {
+                                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v3) {
+                                                              var $91 = {};
+                                                              for (var $92 in v3) {
+                                                                  if ({}.hasOwnProperty.call(v3, $92)) {
+                                                                      $91[$92] = v3[$92];
+                                                                  };
+                                                              };
+                                                              $91.currentAccount = v1;
+                                                              return $91;
+                                                          }))(function () {
+                                                              var sth = Yzmall_Page_Utils.unsafeAlert("\u94f6\u884c\u5361\u89e3\u7ed1\u6210\u529f");
+                                                              return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value1);
+                                                          });
+                                                      });
+                                                  });
+                                              });
+                                          });
+                                      });
+                                  };
+                                  throw new Error("Failed pattern match at Yzmall.Page.BankCardEditor line 89, column 14 - line 147, column 17: " + [ v.constructor.name ]);
+                              };
+                              return Halogen_Component.lifecycleParentComponent(Data_Ord.ordUnit)({
+                                  initialState: initialState,
+                                  render: render,
+                                  "eval": $$eval,
+                                  receiver: Data_Function["const"](Data_Maybe.Nothing.value),
+                                  initializer: Data_Maybe.Just.create(Halogen_Query.action(Initialize.create)),
+                                  finalizer: Data_Maybe.Nothing.value
+                              });
+                          };
+                      };
+                  };
+              };
+          };
+      };
+  };
+  exports["Uploading"] = Uploading;
+  exports["OJBK"] = OJBK;
+  exports["Initialize"] = Initialize;
+  exports["GetBankCards"] = GetBankCards;
+  exports["AddBankCard"] = AddBankCard;
+  exports["DeleteBankCard"] = DeleteBankCard;
+  exports["component"] = component;
+  exports["itemClass"] = itemClass;
+  exports["renderBarInput"] = renderBarInput;
+  exports["renderBankCard"] = renderBankCard;
+  exports["checkEmpty"] = checkEmpty;
+  exports["addParams"] = addParams;
+  exports["pleaseSelectBank"] = pleaseSelectBank;
+  exports["eqAddBtnState"] = eqAddBtnState;
+})(PS["Yzmall.Page.BankCardEditor"] = PS["Yzmall.Page.BankCardEditor"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Conduit_Component_Utils = PS["Conduit.Component.Utils"];
+  var Control_Applicative = PS["Control.Applicative"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Monad_Reader = PS["Control.Monad.Reader"];
+  var Control_Monad_Reader_Class = PS["Control.Monad.Reader.Class"];
+  var Control_Monad_State_Class = PS["Control.Monad.State.Class"];
+  var Data_Either = PS["Data.Either"];
+  var Data_Eq = PS["Data.Eq"];
+  var Data_Function = PS["Data.Function"];
+  var Data_Functor = PS["Data.Functor"];
+  var Data_Lens = PS["Data.Lens"];
+  var Data_Lens_Fold = PS["Data.Lens.Fold"];
+  var Data_Lens_Internal_Forget = PS["Data.Lens.Internal.Forget"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Data_Maybe_First = PS["Data.Maybe.First"];
+  var Data_Ord = PS["Data.Ord"];
+  var Data_Semigroup = PS["Data.Semigroup"];
+  var Data_Tuple = PS["Data.Tuple"];
+  var Data_Unit = PS["Data.Unit"];
+  var Data_Void = PS["Data.Void"];
+  var Effect_Aff_Class = PS["Effect.Aff.Class"];
+  var Effect_Class = PS["Effect.Class"];
+  var Effect_Ref = PS["Effect.Ref"];
+  var Effect_Unsafe = PS["Effect.Unsafe"];
+  var Halogen = PS["Halogen"];
+  var Halogen_Component = PS["Halogen.Component"];
+  var Halogen_HTML = PS["Halogen.HTML"];
+  var Halogen_HTML_Core = PS["Halogen.HTML.Core"];
+  var Halogen_HTML_Elements = PS["Halogen.HTML.Elements"];
+  var Halogen_HTML_Events = PS["Halogen.HTML.Events"];
+  var Halogen_HTML_Properties = PS["Halogen.HTML.Properties"];
+  var Halogen_Query = PS["Halogen.Query"];
+  var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
+  var Halogen_Themes_Bootstrap4 = PS["Halogen.Themes.Bootstrap4"];
+  var Network_RemoteData = PS["Network.RemoteData"];
+  var Partial_Unsafe = PS["Partial.Unsafe"];
+  var Prelude = PS["Prelude"];
+  var $$String = PS["String"];
+  var Web_HTML_HTMLInputElement = PS["Web.HTML.HTMLInputElement"];
+  var Yzmall_Api_Capablity_Resource_Account = PS["Yzmall.Api.Capablity.Resource.Account"];
+  var Yzmall_Api_Capablity_Resource_Address = PS["Yzmall.Api.Capablity.Resource.Address"];
+  var Yzmall_Api_Capablity_Resource_BankCard = PS["Yzmall.Api.Capablity.Resource.BankCard"];
+  var Yzmall_Api_Capablity_Resource_CommodityOrder = PS["Yzmall.Api.Capablity.Resource.CommodityOrder"];
+  var Yzmall_Capability_Navigate = PS["Yzmall.Capability.Navigate"];
+  var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
+  var Yzmall_Data_Address = PS["Yzmall.Data.Address"];
+  var Yzmall_Data_BankCard = PS["Yzmall.Data.BankCard"];
+  var Yzmall_Data_Route = PS["Yzmall.Data.Route"];
+  var Yzmall_Page_Part_Login = PS["Yzmall.Page.Part.Login"];
+  var Yzmall_Page_Part_MobileMenu = PS["Yzmall.Page.Part.MobileMenu"];
+  var Yzmall_Page_Part_Navbar = PS["Yzmall.Page.Part.Navbar"];
+  var Yzmall_Page_Utils = PS["Yzmall.Page.Utils"];
+  var Yzmall_Resource_Commodity = PS["Yzmall.Resource.Commodity"];
+  var Yzmall_Utils = PS["Yzmall.Utils"];                 
+  var Initialize = (function () {
+      function Initialize(value0) {
+          this.value0 = value0;
+      };
+      Initialize.create = function (value0) {
+          return new Initialize(value0);
+      };
+      return Initialize;
+  })();
+  var GetBankCards = (function () {
+      function GetBankCards(value0) {
+          this.value0 = value0;
+      };
+      GetBankCards.create = function (value0) {
+          return new GetBankCards(value0);
+      };
+      return GetBankCards;
+  })();
+  var SelectBankCard = (function () {
+      function SelectBankCard(value0, value1) {
+          this.value0 = value0;
+          this.value1 = value1;
+      };
+      SelectBankCard.create = function (value0) {
+          return function (value1) {
+              return new SelectBankCard(value0, value1);
+          };
+      };
+      return SelectBankCard;
+  })();
+  var itemClass = Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItem)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.rounded0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemDark)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemAction)(Halogen_Themes_Bootstrap4.textWhite)))))));
+  var renderBankCard = function (mbCardId) {
+      return function (card) {
+          var isDefault = function (id) {
+              var $18 = id === card.id;
+              if ($18) {
+                  return new Data_Maybe.Just(true);
+              };
+              return Data_Maybe.Nothing.value;
+          };
+          var bar = function (leftText) {
+              return function (rightText) {
+                  return function (rightColor) {
+                      return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(itemClass), Yzmall_Utils.style("font-size: 15px; margin-bottom: 1px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRow)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.alignItemsCenter))))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.style("min-width: 32px;") ])([ Halogen_HTML_Core.text(leftText) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto), Yzmall_Utils.style("color: " + rightColor) ])([ Halogen_HTML_Core.text(rightText) ]) ]) ]);
+                  };
+              };
+          };
+          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroup)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb3)(Halogen_Themes_Bootstrap4.mxAuto))) ])([ bar("\u662f\u5426\u9ed8\u8ba4\u5730\u5740")((function () {
+              var $19 = Data_Eq.eq(Data_Maybe.eqMaybe(Data_Eq.eqBoolean))(new Data_Maybe.Just(true))(Control_Bind.bindFlipped(Data_Maybe.bindMaybe)(isDefault)(mbCardId));
+              if ($19) {
+                  return "\u9ed8\u8ba4";
+              };
+              return "\u975e\u9ed8\u8ba4";
+          })())("#B6F9FF"), bar("\u8d26\u6237\u59d3\u540d")(card.name)("#ffffff"), bar("\u94f6\u884c\u5361\u8d26\u6237")(card.cardId)("#ffffff"), bar("\u5f00\u6237\u884c\u5730\u533a")(card.region)("#ffffff"), bar("\u9884\u7559\u624b\u673a\u53f7")(card.phone)("#ffffff"), bar("\u5f00\u6237\u94f6\u884c")(card.bank)("#ffffff"), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(itemClass)(Halogen_Themes_Bootstrap4.btn)), Yzmall_Utils.style("font-size: 15px; margin-bottom: 1px"), Halogen_HTML_Events.onClick(Halogen_HTML_Events.input_(SelectBankCard.create(card.id))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRow)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.alignItemsCenter))))) ])([ Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text("\u64cd\u4f5c") ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto), Yzmall_Utils.style("color: #F05451") ])([ Halogen_HTML_Core.text("[\u4f7f\u7528\u8be5\u94f6\u884c\u5361]") ]) ]) ]) ]);
+      };
+  };
+  var component = function (dictMonadAff) {
+      return function (dictManageCommodity) {
+          return function (dictManageAccount) {
+              return function (dictManageOrder) {
+                  return function (dictManageBankCard) {
+                      return function (dictMonadAsk) {
+                          return function (dictNavigate) {
+                              var render = function (state) {
+                                  var mbCardId = Control_Bind.bindFlipped(Data_Maybe.bindMaybe)(function (v) {
+                                      return v.defaultBankCard;
+                                  })(state.currentAccount);
+                                  var mbBankCards = Data_Lens_Fold.preview(Network_RemoteData._Success(Data_Lens_Internal_Forget.choiceForget(Data_Maybe_First.monoidFirst)))(state.bankCards);
+                                  return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Halogen_HTML.slot(Data_Unit.unit)(Yzmall_Page_Part_Navbar.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageAccount))({
+                                      page: Yzmall_Page_Part_Navbar.Fourth.value
+                                  })(Data_Void.absurd), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.mt3)))), Yzmall_Utils.style("min-height: 633px") ])(Conduit_Component_Utils.maybeElemArray(mbBankCards)(Data_Functor.map(Data_Functor.functorArray)(renderBankCard(mbCardId)))), Yzmall_Utils.renderFooter, Yzmall_Page_Part_MobileMenu.mobileMenu(Yzmall_Page_Part_Navbar.Fourth.value), Yzmall_Page_Part_MobileMenu.forMobileMenu ]);
+                              };
+                              var initialState = function (v) {
+                                  return {
+                                      bankCards: Network_RemoteData.NotAsked.value,
+                                      currentAccount: Data_Maybe.Nothing.value
+                                  };
+                              };
+                              var $$eval = function (v) {
+                                  if (v instanceof Initialize) {
+                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Conduit_Component_Utils.guardAccount(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk))(Yzmall_Capability_Navigate.navigateHalogenM(dictNavigate)))(function (v1) {
+                                          if (v1 instanceof Data_Maybe.Nothing) {
+                                              return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                          };
+                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v2) {
+                                              var $22 = {};
+                                              for (var $23 in v2) {
+                                                  if ({}.hasOwnProperty.call(v2, $23)) {
+                                                      $22[$23] = v2[$23];
+                                                  };
+                                              };
+                                              $22.currentAccount = v1;
+                                              return $22;
+                                          }))(function () {
+                                              return Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new GetBankCards(v.value0))));
+                                          });
+                                      }))(function () {
+                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                      });
+                                  };
+                                  if (v instanceof GetBankCards) {
+                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify(Halogen_Query_HalogenM.monadStateHalogenM)(function (v1) {
+                                          var $26 = {};
+                                          for (var $27 in v1) {
+                                              if ({}.hasOwnProperty.call(v1, $27)) {
+                                                  $26[$27] = v1[$27];
+                                              };
+                                          };
+                                          $26.bankCards = Network_RemoteData.Loading.value;
+                                          return $26;
+                                      }))(function (v1) {
+                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_BankCard.myBankCards(Yzmall_Api_Capablity_Resource_BankCard.manageBankCardHalogenM(dictManageBankCard)))(function (v2) {
+                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v3) {
+                                                  var $31 = {};
+                                                  for (var $32 in v3) {
+                                                      if ({}.hasOwnProperty.call(v3, $32)) {
+                                                          $31[$32] = v3[$32];
+                                                      };
+                                                  };
+                                                  $31.bankCards = Network_RemoteData.fromMaybe(v2);
+                                                  return $31;
+                                              }))(function () {
+                                                  return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                              });
+                                          });
+                                      });
+                                  };
+                                  if (v instanceof SelectBankCard) {
+                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_Reader_Class.ask(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk)))(function (v1) {
+                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Effect_Ref.write(new Data_Maybe.Just(v.value0))(v1.currentBankCardId)))(function () {
+                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Effect_Ref.read(v1.lastRoute)))(function (v2) {
+                                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)((function () {
+                                                      if (v2 instanceof Data_Maybe.Just) {
+                                                          return Yzmall_Capability_Navigate.navigate(Yzmall_Capability_Navigate.navigateHalogenM(dictNavigate))(v2.value0);
+                                                      };
+                                                      if (v2 instanceof Data_Maybe.Nothing) {
+                                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                                      };
+                                                      throw new Error("Failed pattern match at Yzmall.Page.BankCardSelector line 98, column 11 - line 102, column 24: " + [ v2.constructor.name ]);
+                                                  })())(function () {
+                                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value1);
+                                                  });
+                                              });
+                                          });
+                                      });
+                                  };
+                                  throw new Error("Failed pattern match at Yzmall.Page.BankCardSelector line 81, column 14 - line 103, column 17: " + [ v.constructor.name ]);
+                              };
+                              return Halogen_Component.lifecycleParentComponent(Data_Ord.ordUnit)({
+                                  initialState: initialState,
+                                  render: render,
+                                  "eval": $$eval,
+                                  receiver: Data_Function["const"](Data_Maybe.Nothing.value),
+                                  initializer: Data_Maybe.Just.create(Halogen_Query.action(Initialize.create)),
+                                  finalizer: Data_Maybe.Nothing.value
+                              });
+                          };
+                      };
+                  };
+              };
+          };
+      };
+  };
+  exports["Initialize"] = Initialize;
+  exports["GetBankCards"] = GetBankCards;
+  exports["SelectBankCard"] = SelectBankCard;
+  exports["component"] = component;
+  exports["itemClass"] = itemClass;
+  exports["renderBankCard"] = renderBankCard;
+})(PS["Yzmall.Page.BankCardSelector"] = PS["Yzmall.Page.BankCardSelector"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Conduit_Component_Utils = PS["Conduit.Component.Utils"];
+  var Control_Applicative = PS["Control.Applicative"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Monad_Reader = PS["Control.Monad.Reader"];
+  var Control_Monad_State_Class = PS["Control.Monad.State.Class"];
+  var Data_Array = PS["Data.Array"];
+  var Data_Eq = PS["Data.Eq"];
+  var Data_Function = PS["Data.Function"];
+  var Data_Functor = PS["Data.Functor"];
+  var Data_Lens = PS["Data.Lens"];
+  var Data_Lens_Fold = PS["Data.Lens.Fold"];
+  var Data_Lens_Internal_Forget = PS["Data.Lens.Internal.Forget"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Data_Maybe_First = PS["Data.Maybe.First"];
+  var Data_Ord = PS["Data.Ord"];
+  var Data_Ordering = PS["Data.Ordering"];
+  var Data_Ring = PS["Data.Ring"];
+  var Data_Semigroup = PS["Data.Semigroup"];
+  var Data_Semiring = PS["Data.Semiring"];
+  var Data_Show = PS["Data.Show"];
+  var Data_Unit = PS["Data.Unit"];
+  var Data_Void = PS["Data.Void"];
   var Effect_Aff_Class = PS["Effect.Aff.Class"];
   var Effect_Ref = PS["Effect.Ref"];
   var Halogen = PS["Halogen"];
@@ -32612,6 +37316,731 @@ var PS = {};
   var Network_RemoteData = PS["Network.RemoteData"];
   var Prelude = PS["Prelude"];
   var $$String = PS["String"];
+  var Yzmalal_Data_CommodityOrder = PS["Yzmalal.Data.CommodityOrder"];
+  var Yzmall_Api_Capablity_Resource_Account = PS["Yzmall.Api.Capablity.Resource.Account"];
+  var Yzmall_Api_Capablity_Resource_CommodityOrder = PS["Yzmall.Api.Capablity.Resource.CommodityOrder"];
+  var Yzmall_Capability_Navigate = PS["Yzmall.Capability.Navigate"];
+  var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
+  var Yzmall_Data_PreciseDateTime = PS["Yzmall.Data.PreciseDateTime"];
+  var Yzmall_Page_Part_Login = PS["Yzmall.Page.Part.Login"];
+  var Yzmall_Page_Part_MobileMenu = PS["Yzmall.Page.Part.MobileMenu"];
+  var Yzmall_Page_Part_Navbar = PS["Yzmall.Page.Part.Navbar"];
+  var Yzmall_Page_Utils = PS["Yzmall.Page.Utils"];
+  var Yzmall_Resource_Commodity = PS["Yzmall.Resource.Commodity"];
+  var Yzmall_Utils = PS["Yzmall.Utils"];                 
+  var Initialize = (function () {
+      function Initialize(value0) {
+          this.value0 = value0;
+      };
+      Initialize.create = function (value0) {
+          return new Initialize(value0);
+      };
+      return Initialize;
+  })();
+  var GetOrders = (function () {
+      function GetOrders(value0) {
+          this.value0 = value0;
+      };
+      GetOrders.create = function (value0) {
+          return new GetOrders(value0);
+      };
+      return GetOrders;
+  })();
+  var DeleteOrder = (function () {
+      function DeleteOrder(value0, value1) {
+          this.value0 = value0;
+          this.value1 = value1;
+      };
+      DeleteOrder.create = function (value0) {
+          return function (value1) {
+              return new DeleteOrder(value0, value1);
+          };
+      };
+      return DeleteOrder;
+  })();
+  var component = function (dictMonadAff) {
+      return function (dictMonadAsk) {
+          return function (dictNavigate) {
+              return function (dictManageCommodity) {
+                  return function (dictManageOrder) {
+                      return function (dictManageAccount) {
+                          var render = function (state) {
+                              var status = function (process) {
+                                  return function (order) {
+                                      return Data_Eq.eq(Yzmalal_Data_CommodityOrder.eqOrderStatus)(order.process)(process);
+                                  };
+                              };
+                              var renderPCRecord = function (order) {
+                                  var commodity = Yzmall_Page_Utils.getCommodityById(order.commodityId);
+                                  return Halogen_HTML_Elements.tr([ Yzmall_Utils.style("border-top-color: #454545!important; border-bottom-color: #454545!important") ])([ Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("row") ])([ Halogen_HTML_Core.text(Data_Show.show(Data_Show.showInt)(order.id)) ]), Halogen_HTML_Elements.td_([ Halogen_HTML_Core.text(Yzmall_Data_PreciseDateTime.toDisplayTime(order.createTime)) ]), Halogen_HTML_Elements.td([ Yzmall_Utils.style("color: #f8f2d8") ])([ Halogen_HTML_Core.text(commodity.name) ]), Halogen_HTML_Elements.td([ Yzmall_Utils.style(Yzmall_Page_Utils.yellowColor) ])([ Halogen_HTML_Core.text("\uffe5" + Data_Show.show(Data_Show.showNumber)(order.payCost + order.commissionCost + order.rebateCost)) ]), Halogen_HTML_Elements.td_(Data_Semigroup.append(Data_Semigroup.semigroupArray)([ Halogen_HTML_Core.text(Data_Show.show(Yzmalal_Data_CommodityOrder.showOrderStatus)(order.process)) ])((function () {
+                                      var $12 = Data_Eq.eq(Yzmalal_Data_CommodityOrder.eqOrderStatus)(order.process)(Yzmalal_Data_CommodityOrder.WaitForPayment.value);
+                                      if ($12) {
+                                          return [ Halogen_HTML_Elements.button([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Halogen_Themes_Bootstrap4.btnDanger)), Halogen_HTML_Events.onClick(Halogen_HTML_Events.input_(DeleteOrder.create(order.id))) ])([ Halogen_HTML_Core.text("\u5220\u9664") ]) ];
+                                      };
+                                      return [  ];
+                                  })())) ]);
+                              };
+                              var renderMobileRecord = function (order) {
+                                  var commodity = Yzmall_Page_Utils.getCommodityById(order.commodityId);
+                                  return Halogen_HTML_Elements.div([ Yzmall_Utils.style("background-color: #454545"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb3)(Halogen_Themes_Bootstrap4.py1)))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px2)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb1)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.pb1)(Halogen_Themes_Bootstrap4.borderBottom)))))), Yzmall_Utils.style("border-bottom-color: #555555!important; font-size: 15px") ])([ Halogen_HTML_Core.text("\u8ba2\u5355\u7f16\u53f7 " + Data_Show.show(Data_Show.showInt)(order.id)), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.ml2) ])([ Halogen_HTML_Core.text(Yzmall_Data_PreciseDateTime.toDisplayTime(order.createTime)) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto) ])([ Halogen_HTML_Core.text(Data_Show.show(Yzmalal_Data_CommodityOrder.showOrderStatus)(order.process)) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.px2))) ])(Data_Semigroup.append(Data_Semigroup.semigroupArray)([ Halogen_HTML_Elements.div([ Yzmall_Utils.style("color: #f8f2d8"), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr4) ])([ Halogen_HTML_Core.text("\uffe5" + Data_Show.show(Data_Show.showNumber)(order.payCost + order.commissionCost + order.rebateCost)) ]), Halogen_HTML_Core.text(Data_Show.show(Data_Show.showString)(commodity.name) + (" * " + Data_Show.show(Data_Show.showInt)(order.amount))) ])((function () {
+                                      var $13 = Data_Eq.eq(Yzmalal_Data_CommodityOrder.eqOrderStatus)(order.process)(Yzmalal_Data_CommodityOrder.WaitForPayment.value);
+                                      if ($13) {
+                                          return [ Halogen_HTML_Elements.button([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Halogen_Themes_Bootstrap4.btnDanger)), Halogen_HTML_Events.onClick(Halogen_HTML_Events.input_(DeleteOrder.create(order.id))) ])([ Halogen_HTML_Core.text("\u5220\u9664") ]) ];
+                                      };
+                                      return [  ];
+                                  })())) ]);
+                              };
+                              var renderTabPane = function (id) {
+                                  return function (n) {
+                                      return function (records) {
+                                          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.tabPane)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.fade)(Yzmall_Page_Utils.existWhenZero(n)(Yzmall_Utils.append(Halogen_Themes_Bootstrap4.active)("show"))))), Yzmall_Utils.attr_("id")(id), Yzmall_Utils.attr_("role")("tabpanel") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Yzmall_Page_Utils.pcOnly)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mt2)(Halogen_Themes_Bootstrap4.px0)))), Yzmall_Utils.style("min-height: 633px") ])([ Halogen_HTML_Elements.table([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.table)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.tableStriped)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.tableDark)(Halogen_Themes_Bootstrap4.bgTransparent)))) ])(Data_Semigroup.append(Data_Semigroup.semigroupArray)([ Halogen_HTML_Elements.tr_([ Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u8ba2\u5355\u7f16\u53f7") ]), Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u521b\u5efa\u65f6\u95f4") ]), Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u5546\u54c1") ]), Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u91d1\u989d") ]), Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u72b6\u6001") ]) ]) ])(Data_Functor.map(Data_Functor.functorArray)(renderPCRecord)(records))) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Yzmall_Page_Utils.mobileOnly)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.mt2))))) ])(Data_Functor.map(Data_Functor.functorArray)(renderMobileRecord)(records)) ]);
+                                      };
+                                  };
+                              };
+                              var renderTabContent = function (orders) {
+                                  return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.tabContent), Yzmall_Utils.attr_("id")("nav-tabContent"), Yzmall_Utils.style("min-height: 600px") ])([ renderTabPane("all")(0)(orders), renderTabPane("wait_for_deliver")(1)(Data_Array.filter(status(Yzmalal_Data_CommodityOrder.WaitForDeliver.value))(orders)), renderTabPane("wait_for_got")(2)(Data_Array.filter(status(Yzmalal_Data_CommodityOrder.Delivered.value))(orders)), renderTabPane("complete")(3)(Data_Array.filter(status(Yzmalal_Data_CommodityOrder.Refunded.value))(orders)) ]);
+                              };
+                              var renderItem = function (n) {
+                                  return function (id) {
+                                      return function (name) {
+                                          return Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.navItem)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.navLink)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.bgTransparent)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Yzmall_Page_Utils.existWhenZero(n)(Halogen_Themes_Bootstrap4.active)))))), Yzmall_Utils.attr_("id")("nav-" + (id + "-tab")), Yzmall_Utils.attr_("data-toggle")("tab"), Yzmall_Utils.attr_("href")("#" + id), Yzmall_Utils.attr_("role")("tab") ])([ Halogen_HTML_Core.text(name) ]);
+                                      };
+                                  };
+                              };
+                              var renderNavTab = Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.nav)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.navTabs)(Halogen_Themes_Bootstrap4.bgTransparent))), Yzmall_Utils.attr_("id")("nav-tab"), Yzmall_Utils.attr_("role")("tablist") ])([ renderItem(0)("all")("\u5168\u90e8"), renderItem(1)("wait_for_deliver")("\u5f85\u53d1\u8d27"), renderItem(2)("wait_for_got")("\u5f85\u6536\u8d27"), renderItem(3)("complete")("\u5df2\u5b8c\u6210") ]);
+                              var mbOrders = Data_Functor.map(Data_Maybe.functorMaybe)(Data_Array.sortBy(function (a) {
+                                  return function (b) {
+                                      var $14 = (b.id - a.id | 0) > 0;
+                                      if ($14) {
+                                          return Data_Ordering.GT.value;
+                                      };
+                                      return Data_Ordering.LT.value;
+                                  };
+                              }))(Data_Lens_Fold.preview(Network_RemoteData._Success(Data_Lens_Internal_Forget.choiceForget(Data_Maybe_First.monoidFirst)))(state.orders));
+                              return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Halogen_HTML.slot(Data_Unit.unit)(Yzmall_Page_Part_Navbar.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageAccount))({
+                                  page: Yzmall_Page_Part_Navbar.Fourth.value
+                              })(Data_Void.absurd), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Halogen_Themes_Bootstrap4.px0)) ])([ Halogen_HTML_Elements.nav_([ renderNavTab, Conduit_Component_Utils.maybeElem(mbOrders)(renderTabContent) ]) ]), Yzmall_Utils.renderFooter, Yzmall_Page_Part_MobileMenu.forMobileMenu, Yzmall_Page_Part_MobileMenu.mobileMenu(Yzmall_Page_Part_Navbar.Fourth.value) ]);
+                          };
+                          var initialState = function (v) {
+                              return {
+                                  orders: Network_RemoteData.NotAsked.value
+                              };
+                          };
+                          var $$eval = function (v) {
+                              if (v instanceof Initialize) {
+                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Conduit_Component_Utils.guardAccount(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk))(Yzmall_Capability_Navigate.navigateHalogenM(dictNavigate)))(function (v1) {
+                                      if (v1 instanceof Data_Maybe.Nothing) {
+                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                      };
+                                      return Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new GetOrders(v.value0))));
+                                  }))(function () {
+                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                  });
+                              };
+                              if (v instanceof GetOrders) {
+                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_CommodityOrder.viewOrder(Yzmall_Api_Capablity_Resource_CommodityOrder.manageOrderHalogenM(dictManageOrder)))(function (v1) {
+                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v2) {
+                                          var $19 = {};
+                                          for (var $20 in v2) {
+                                              if ({}.hasOwnProperty.call(v2, $20)) {
+                                                  $19[$20] = v2[$20];
+                                              };
+                                          };
+                                          $19.orders = Network_RemoteData.fromMaybe(v1);
+                                          return $19;
+                                      }))(function () {
+                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                      });
+                                  });
+                              };
+                              if (v instanceof DeleteOrder) {
+                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_CommodityOrder.deleteOrder(Yzmall_Api_Capablity_Resource_CommodityOrder.manageOrderHalogenM(dictManageOrder))(Yzmall_Utils.unsafeSlug(Data_Show.show(Data_Show.showInt)(v.value0))))(function (v1) {
+                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new GetOrders(v.value1)))))(function () {
+                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value1);
+                                      });
+                                  });
+                              };
+                              throw new Error("Failed pattern match at Yzmall.Page.MyOrders line 72, column 10 - line 86, column 13: " + [ v.constructor.name ]);
+                          };
+                          return Halogen_Component.lifecycleParentComponent(Data_Ord.ordUnit)({
+                              initialState: initialState,
+                              render: render,
+                              "eval": $$eval,
+                              receiver: Data_Function["const"](Data_Maybe.Nothing.value),
+                              initializer: Data_Maybe.Just.create(Halogen_Query.action(Initialize.create)),
+                              finalizer: Data_Maybe.Nothing.value
+                          });
+                      };
+                  };
+              };
+          };
+      };
+  };
+  exports["Initialize"] = Initialize;
+  exports["GetOrders"] = GetOrders;
+  exports["DeleteOrder"] = DeleteOrder;
+  exports["component"] = component;
+})(PS["Yzmall.Page.MyOrders"] = PS["Yzmall.Page.MyOrders"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Conduit_Component_Utils = PS["Conduit.Component.Utils"];
+  var Control_Applicative = PS["Control.Applicative"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Monad_Reader = PS["Control.Monad.Reader"];
+  var Control_Monad_Reader_Class = PS["Control.Monad.Reader.Class"];
+  var Control_Monad_State_Class = PS["Control.Monad.State.Class"];
+  var Data_Either_Nested = PS["Data.Either.Nested"];
+  var Data_Eq = PS["Data.Eq"];
+  var Data_Function = PS["Data.Function"];
+  var Data_Functor = PS["Data.Functor"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Data_Number_Format = PS["Data.Number.Format"];
+  var Data_Ord = PS["Data.Ord"];
+  var Data_Semigroup = PS["Data.Semigroup"];
+  var Data_Semiring = PS["Data.Semiring"];
+  var Data_Tuple = PS["Data.Tuple"];
+  var Data_Unit = PS["Data.Unit"];
+  var Data_Void = PS["Data.Void"];
+  var Effect_Aff_Class = PS["Effect.Aff.Class"];
+  var Effect_Class = PS["Effect.Class"];
+  var Effect_Ref = PS["Effect.Ref"];
+  var Halogen = PS["Halogen"];
+  var Halogen_Component = PS["Halogen.Component"];
+  var Halogen_HTML = PS["Halogen.HTML"];
+  var Halogen_HTML_Core = PS["Halogen.HTML.Core"];
+  var Halogen_HTML_Elements = PS["Halogen.HTML.Elements"];
+  var Halogen_HTML_Events = PS["Halogen.HTML.Events"];
+  var Halogen_HTML_Properties = PS["Halogen.HTML.Properties"];
+  var Halogen_Query = PS["Halogen.Query"];
+  var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
+  var Halogen_Themes_Bootstrap4 = PS["Halogen.Themes.Bootstrap4"];
+  var Partial_Unsafe = PS["Partial.Unsafe"];
+  var Prelude = PS["Prelude"];
+  var $$String = PS["String"];
+  var Yzmall_Api_Capablity_Resource_Account = PS["Yzmall.Api.Capablity.Resource.Account"];
+  var Yzmall_Api_Capablity_Resource_Address = PS["Yzmall.Api.Capablity.Resource.Address"];
+  var Yzmall_Api_Capablity_Resource_CommodityOrder = PS["Yzmall.Api.Capablity.Resource.CommodityOrder"];
+  var Yzmall_Capability_Navigate = PS["Yzmall.Capability.Navigate"];
+  var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
+  var Yzmall_Data_Route = PS["Yzmall.Data.Route"];
+  var Yzmall_Data_Route2 = PS["Yzmall.Data.Route2"];
+  var Yzmall_Page_Part_Login = PS["Yzmall.Page.Part.Login"];
+  var Yzmall_Page_Part_MobileMenu = PS["Yzmall.Page.Part.MobileMenu"];
+  var Yzmall_Page_Part_Navbar = PS["Yzmall.Page.Part.Navbar"];
+  var Yzmall_Page_Utils = PS["Yzmall.Page.Utils"];
+  var Yzmall_Resource_Commodity = PS["Yzmall.Resource.Commodity"];
+  var Yzmall_Utils = PS["Yzmall.Utils"];                 
+  var Initialize = (function () {
+      function Initialize(value0) {
+          this.value0 = value0;
+      };
+      Initialize.create = function (value0) {
+          return new Initialize(value0);
+      };
+      return Initialize;
+  })();
+  var BindIDCard = (function () {
+      function BindIDCard(value0) {
+          this.value0 = value0;
+      };
+      BindIDCard.create = function (value0) {
+          return new BindIDCard(value0);
+      };
+      return BindIDCard;
+  })();
+  var Logout = (function () {
+      function Logout(value0) {
+          this.value0 = value0;
+      };
+      Logout.create = function (value0) {
+          return new Logout(value0);
+      };
+      return Logout;
+  })();
+  var Uploading = (function () {
+      function Uploading() {
+
+      };
+      Uploading.value = new Uploading();
+      return Uploading;
+  })();
+  var OJBK = (function () {
+      function OJBK() {
+
+      };
+      OJBK.value = new OJBK();
+      return OJBK;
+  })();
+  var renderListGroup = function (arr) {
+      return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroup)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb3)(Halogen_Themes_Bootstrap4.mxAuto))) ])(Data_Functor.map(Data_Functor.functorArray)(function (v) {
+          return Halogen_HTML_Elements.div([ Yzmall_Utils.style("margin-bottom: 1px") ])([ Yzmall_Page_Utils.renderBar(v.value0)(v.value1) ]);
+      })(arr));
+  };
+  var renderAccountItem = function (account) {
+      return function (route) {
+          var rightIcon = function (v) {
+              if (v) {
+                  return Halogen_HTML_Elements.i([ Yzmall_Utils.cls(Yzmall_Utils.append(Halogen_Themes_Bootstrap4.ml2)("fas fa-chevron-right")) ])([  ]);
+              };
+              if (!v) {
+                  return Halogen_HTML_Core.text("");
+              };
+              throw new Error("Failed pattern match at Yzmall.Page.PersonalCenter line 274, column 3 - line 277, column 7: " + [ v.constructor.name ]);
+          };
+          var renderRight = function (str) {
+              if (str instanceof Data_Maybe.Just) {
+                  return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto) ])([ Halogen_HTML_Core.text(str.value0), rightIcon(true) ]);
+              };
+              if (str instanceof Data_Maybe.Nothing) {
+                  return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto) ])([ rightIcon(true) ]);
+              };
+              throw new Error("Failed pattern match at Yzmall.Page.PersonalCenter line 281, column 5 - line 291, column 27: " + [ str.constructor.name ]);
+          };
+          var grade = function (v) {
+              if (v === 1) {
+                  return "VIP\u4f1a\u5458";
+              };
+              if (v === 2) {
+                  return "\u603b\u76d1";
+              };
+              if (v === 3) {
+                  return "\u603b\u88c1";
+              };
+              return "\u7528\u6237";
+          };
+          return Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItem)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.py2)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.rounded0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemDark)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemAction)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Halogen_Themes_Bootstrap4.mb3)))))))))), (function () {
+              var $35 = Data_Maybe.isJust(route);
+              if ($35) {
+                  return Conduit_Component_Utils.safeHref(Data_Maybe.fromJust()(route));
+              };
+              return Yzmall_Utils.attr_("nothing")("nothing");
+          })(), Yzmall_Utils.style("font-size: 15px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.style("background-image: url(" + ("./image/default.png" + ("); background-position: center center; background-size: contain; background-repeat: no-repeat; " + "width: 70px; height: 58px"))) ])([  ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.justifyContentBetween)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.pl2)))))), Yzmall_Utils.style("height: 58px") ])([ Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text(account.nickname) ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text(grade(account.grade)) ]) ]), renderRight(Data_Maybe.Nothing.value) ]);
+      };
+  };
+  var itemClass = Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItem)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.rounded0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemDark)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemAction)(Halogen_Themes_Bootstrap4.textWhite)))))));
+  var renderBarInput = function (name) {
+      return function (id) {
+          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(itemClass)(Halogen_Themes_Bootstrap4.py3)), Yzmall_Utils.style("font-size: 15px; margin-bottom: 1.5px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.row)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRow)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.alignItemsCenter))))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col4)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd3)(Halogen_Themes_Bootstrap4.mrAuto))) ])([ Halogen_HTML_Core.text(name) ]), Halogen_HTML_Elements.input([ Yzmall_Utils.attr_("type")("text"), Yzmall_Utils.attr_("id")(id), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.formControl)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.bgTransparent)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.p0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mlAuto)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col8)(Halogen_Themes_Bootstrap4.colMd4)))))), Yzmall_Utils.style("border-color: #929292; " + (Yzmall_Page_Utils.lightYellowColor + "; height: 30px;")) ]) ]) ]);
+      };
+  };
+  var eqAddBtnState = new Data_Eq.Eq(function (x) {
+      return function (y) {
+          if (x instanceof Uploading && y instanceof Uploading) {
+              return true;
+          };
+          if (x instanceof OJBK && y instanceof OJBK) {
+              return true;
+          };
+          return false;
+      };
+  });
+  var barInfo = function (name) {
+      return function (rightDesc) {
+          return function (leftIcon) {
+              return function (withRightIcon) {
+                  return {
+                      name: name,
+                      rightDesc: rightDesc,
+                      leftIcon: leftIcon,
+                      withRightIcon: withRightIcon
+                  };
+              };
+          };
+      };
+  };
+  var component = function (dictMonadAff) {
+      return function (dictManageCommodity) {
+          return function (dictManageAccount) {
+              return function (dictManageOrder) {
+                  return function (dictManageAddress) {
+                      return function (dictMonadAsk) {
+                          return function (dictNavigate) {
+                              var itemNames = function (balance) {
+                                  return function (gold) {
+                                      return [ [ new Data_Tuple.Tuple(barInfo("\u586b\u5199\u90ae\u5bc4\u5730\u5740")(Data_Maybe.Nothing.value)(new Data_Maybe.Just($$String.icon_address))(true), Data_Maybe.Just.create(new Yzmall_Data_Route.PC_ROUTER(new Data_Maybe.Just(Yzmall_Data_Route2.AddressEditor.value)))), new Data_Tuple.Tuple(barInfo("\u7ed1\u5b9a\u94f6\u884c\u5361")(Data_Maybe.Nothing.value)(new Data_Maybe.Just($$String.icon_wallet))(true), Data_Maybe.Just.create(new Yzmall_Data_Route.PC_ROUTER(new Data_Maybe.Just(Yzmall_Data_Route2.BankCardEditor.value)))) ], [ new Data_Tuple.Tuple(barInfo("MYT\u4f59\u989d")(Data_Maybe.Just.create(Data_Number_Format.toStringWith(Data_Number_Format.fixed(2))(balance)))(new Data_Maybe.Just($$String.icon_money))(false), Data_Maybe.Nothing.value) ], [ new Data_Tuple.Tuple(barInfo("\u6211\u7684\u63a8\u5e7f\u7801")(new Data_Maybe.Just("(\u751f\u6210\u540e\u957f\u6309\u56fe\u7247\u4fdd\u5b58\u5230\u624b\u673a)"))(new Data_Maybe.Just($$String.icon_qrcode))(true), new Data_Maybe.Just(Yzmall_Data_Route.WDFX_ROUTE.value)), new Data_Tuple.Tuple(barInfo("\u6211\u7684\u63a8\u5e7f")(Data_Maybe.Nothing.value)(new Data_Maybe.Just($$String.icon_share))(true), new Data_Maybe.Just(Yzmall_Data_Route.WDTG_ROUTE.value)) ], [ new Data_Tuple.Tuple(barInfo("\u6211\u7684\u8ba2\u5355")(Data_Maybe.Nothing.value)(new Data_Maybe.Just($$String.icon_back))(true), Data_Maybe.Just.create(new Yzmall_Data_Route.PC_ROUTER(new Data_Maybe.Just(Yzmall_Data_Route2.MyOrders.value)))) ] ];
+                                  };
+                              };
+                              var render = function (v) {
+                                  if (v.account instanceof Data_Maybe.Nothing) {
+                                      return Halogen_HTML_Elements.div_([  ]);
+                                  };
+                                  if (v.account instanceof Data_Maybe.Just) {
+                                      var renderAccount = function (v1) {
+                                          if (v1 instanceof Data_Maybe.Nothing) {
+                                              return [ Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItem)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.rounded0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemDark)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemAction)(Halogen_Themes_Bootstrap4.textWhite)))))))), Halogen_HTML_Properties.href("#collapseBindIDCard"), Yzmall_Utils.attr_("data-toggle")("collapse"), Yzmall_Utils.style("font-size: 15px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRow)(Halogen_Themes_Bootstrap4.alignItemsCenter))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.style(Yzmall_Page_Utils.darkRedColor) ])([ Halogen_HTML_Core.text("[\u9a8c\u8bc1\u8eab\u4efd\u8bc1\u6fc0\u6d3b\u8d26\u53f7]") ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto) ])([ Halogen_HTML_Elements.i([ Yzmall_Utils.cls(Yzmall_Utils.append(Halogen_Themes_Bootstrap4.ml2)("fas fa-chevron-right")) ])([  ]) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.collapse), Yzmall_Utils.attr_("id")("collapseBindIDCard"), Yzmall_Utils.style("font-size: 15px; margin-bottom: 1.5px") ])([ renderBarInput("\u8eab\u4efd\u8bc1\u59d3\u540d")("idcard_name"), renderBarInput("\u8eab\u4efd\u8bc1\u53f7\u7801")("idcard_id"), Halogen_HTML_Elements.button([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItem)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.rounded0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemDark)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemAction)(Halogen_Themes_Bootstrap4.textWhite))))))))), Yzmall_Utils.style("font-size: 15px"), Halogen_HTML_Events.onClick(Halogen_HTML_Events.input_(BindIDCard.create)), Halogen_HTML_Properties.disabled(Data_Eq.eq(eqAddBtnState)(v.addBtnState)(Uploading.value)) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.myAuto)), Yzmall_Utils.style(Yzmall_Page_Utils.darkRedColor) ])((function () {
+                                                  if (v.addBtnState instanceof OJBK) {
+                                                      return [ Halogen_HTML_Core.text("\u7ed1\u5b9a") ];
+                                                  };
+                                                  if (v.addBtnState instanceof Uploading) {
+                                                      return [ Halogen_HTML_Elements.span([ Yzmall_Utils.cls("spinner-border spinner-border-sm"), Yzmall_Utils.attr_("role")("status") ])([  ]), Halogen_HTML_Core.text("\u7ed1\u5b9a\u4e2d...") ];
+                                                  };
+                                                  throw new Error("Failed pattern match at Yzmall.Page.PersonalCenter line 183, column 19 - line 192, column 24: " + [ v.addBtnState.constructor.name ]);
+                                              })()) ]) ]) ];
+                                          };
+                                          if (v1 instanceof Data_Maybe.Just) {
+                                              return Data_Functor.map(Data_Functor.functorArray)(renderListGroup)(itemNames(v1.value0.commissionBalance + v1.value0.rebateBalance)(v1.value0.gold));
+                                          };
+                                          throw new Error("Failed pattern match at Yzmall.Page.PersonalCenter line 149, column 9 - line 197, column 12: " + [ v1.constructor.name ]);
+                                      };
+                                      return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Halogen_HTML.slot(Data_Unit.unit)(Yzmall_Page_Part_Navbar.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageAccount))({
+                                          page: Yzmall_Page_Part_Navbar.Fourth.value
+                                      })(Data_Void.absurd), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.mt3)))), Yzmall_Utils.style("min-height: 633px") ])(Data_Semigroup.append(Data_Semigroup.semigroupArray)([ renderAccountItem(v.account.value0)(Data_Maybe.Just.create(new Yzmall_Data_Route.PC_ROUTER(new Data_Maybe.Just(Yzmall_Data_Route2.AccountInfo.value)))) ])(Data_Semigroup.append(Data_Semigroup.semigroupArray)(renderAccount((function () {
+                                          var $44 = Data_Maybe.isNothing(v.account.value0.idCard);
+                                          if ($44) {
+                                              return Data_Maybe.Nothing.value;
+                                          };
+                                          return new Data_Maybe.Just(v.account.value0);
+                                      })()))([ Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItem)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.rounded0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mt3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemDark)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemAction)(Halogen_Themes_Bootstrap4.textWhite)))))))))), Yzmall_Utils.style("font-size: 15px"), Halogen_HTML_Events.onClick(Halogen_HTML_Events.input_(Logout.create)) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.myAuto)), Yzmall_Utils.style(Yzmall_Page_Utils.darkRedColor) ])([ Halogen_HTML_Core.text("\u9000\u51fa\u767b\u5f55") ]) ]) ]))), Yzmall_Utils.renderFooter, Yzmall_Page_Part_MobileMenu.mobileMenu(Yzmall_Page_Part_Navbar.Fourth.value), Yzmall_Page_Part_MobileMenu.forMobileMenu ]);
+                                  };
+                                  throw new Error("Failed pattern match at Yzmall.Page.PersonalCenter line 111, column 7 - line 111, column 63: " + [ v.constructor.name ]);
+                              };
+                              var initialState = function (v) {
+                                  return {
+                                      account: Data_Maybe.Nothing.value,
+                                      addBtnState: OJBK.value
+                                  };
+                              };
+                              var $$eval = function (v) {
+                                  if (v instanceof Initialize) {
+                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Conduit_Component_Utils.guardAccount(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk))(Yzmall_Capability_Navigate.navigateHalogenM(dictNavigate)))(function (v1) {
+                                          if (v1 instanceof Data_Maybe.Nothing) {
+                                              return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                          };
+                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Account.getAccountInfo(Yzmall_Api_Capablity_Resource_Account.manageAccountHalogenM(dictManageAccount)))(function (v2) {
+                                              return Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v3) {
+                                                  var $51 = {};
+                                                  for (var $52 in v3) {
+                                                      if ({}.hasOwnProperty.call(v3, $52)) {
+                                                          $51[$52] = v3[$52];
+                                                      };
+                                                  };
+                                                  $51.account = v2;
+                                                  return $51;
+                                              });
+                                          });
+                                      }))(function () {
+                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                      });
+                                  };
+                                  if (v instanceof BindIDCard) {
+                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("idcard_name")))(function (v1) {
+                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("idcard_id")))(function (v2) {
+                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v3) {
+                                                  var $57 = {};
+                                                  for (var $58 in v3) {
+                                                      if ({}.hasOwnProperty.call(v3, $58)) {
+                                                          $57[$58] = v3[$58];
+                                                      };
+                                                  };
+                                                  $57.addBtnState = Uploading.value;
+                                                  return $57;
+                                              }))(function () {
+                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Account.setName(Yzmall_Api_Capablity_Resource_Account.manageAccountHalogenM(dictManageAccount))(v1)(v2))(function (v3) {
+                                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v4) {
+                                                          var $61 = {};
+                                                          for (var $62 in v4) {
+                                                              if ({}.hasOwnProperty.call(v4, $62)) {
+                                                                  $61[$62] = v4[$62];
+                                                              };
+                                                          };
+                                                          $61.account = v3;
+                                                          return $61;
+                                                      }))(function () {
+                                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v4) {
+                                                              var $64 = {};
+                                                              for (var $65 in v4) {
+                                                                  if ({}.hasOwnProperty.call(v4, $65)) {
+                                                                      $64[$65] = v4[$65];
+                                                                  };
+                                                              };
+                                                              $64.addBtnState = OJBK.value;
+                                                              return $64;
+                                                          }))(function () {
+                                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)((function () {
+                                                                  if (v3 instanceof Data_Maybe.Just) {
+                                                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.alertMsg("\u8eab\u4efd\u8ba4\u8bc1\u6210\u529f")))(function () {
+                                                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_Reader_Class.ask(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk)))(function (v4) {
+                                                                              return Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Effect_Ref.write(v3)(v4.currentAccount));
+                                                                          });
+                                                                      });
+                                                                  };
+                                                                  if (v3 instanceof Data_Maybe.Nothing) {
+                                                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                                                  };
+                                                                  throw new Error("Failed pattern match at Yzmall.Page.PersonalCenter line 99, column 11 - line 105, column 24: " + [ v3.constructor.name ]);
+                                                              })())(function () {
+                                                                  return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                                              });
+                                                          });
+                                                      });
+                                                  });
+                                              });
+                                          });
+                                      });
+                                  };
+                                  if (v instanceof Logout) {
+                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Account.logout(Yzmall_Api_Capablity_Resource_Account.manageAccountHalogenM(dictManageAccount)))(function (v1) {
+                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                      });
+                                  };
+                                  throw new Error("Failed pattern match at Yzmall.Page.PersonalCenter line 84, column 14 - line 109, column 17: " + [ v.constructor.name ]);
+                              };
+                              return Halogen_Component.lifecycleParentComponent(Data_Ord.ordUnit)({
+                                  initialState: initialState,
+                                  render: render,
+                                  "eval": $$eval,
+                                  receiver: Data_Function["const"](Data_Maybe.Nothing.value),
+                                  initializer: Data_Maybe.Just.create(Halogen_Query.action(Initialize.create)),
+                                  finalizer: Data_Maybe.Nothing.value
+                              });
+                          };
+                      };
+                  };
+              };
+          };
+      };
+  };
+  exports["Uploading"] = Uploading;
+  exports["OJBK"] = OJBK;
+  exports["Initialize"] = Initialize;
+  exports["BindIDCard"] = BindIDCard;
+  exports["Logout"] = Logout;
+  exports["component"] = component;
+  exports["barInfo"] = barInfo;
+  exports["renderListGroup"] = renderListGroup;
+  exports["renderAccountItem"] = renderAccountItem;
+  exports["itemClass"] = itemClass;
+  exports["renderBarInput"] = renderBarInput;
+  exports["eqAddBtnState"] = eqAddBtnState;
+})(PS["Yzmall.Page.PersonalCenter"] = PS["Yzmall.Page.PersonalCenter"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Control_Applicative = PS["Control.Applicative"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Monad_Reader = PS["Control.Monad.Reader"];
+  var Control_Monad_State_Class = PS["Control.Monad.State.Class"];
+  var Data_Either = PS["Data.Either"];
+  var Data_Either_Nested = PS["Data.Either.Nested"];
+  var Data_Eq = PS["Data.Eq"];
+  var Data_Function = PS["Data.Function"];
+  var Data_Functor_Coproduct = PS["Data.Functor.Coproduct"];
+  var Data_Functor_Coproduct_Nested = PS["Data.Functor.Coproduct.Nested"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Data_Ord = PS["Data.Ord"];
+  var Data_Unit = PS["Data.Unit"];
+  var Data_Void = PS["Data.Void"];
+  var Effect_Aff_Class = PS["Effect.Aff.Class"];
+  var Effect_Ref = PS["Effect.Ref"];
+  var Halogen = PS["Halogen"];
+  var Halogen_Component = PS["Halogen.Component"];
+  var Halogen_Component_ChildPath = PS["Halogen.Component.ChildPath"];
+  var Halogen_HTML = PS["Halogen.HTML"];
+  var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
+  var Prelude = PS["Prelude"];
+  var Slug = PS["Slug"];
+  var Type_Data_Boolean = PS["Type.Data.Boolean"];
+  var Yzmall_Api_Capablity_Resource_Account = PS["Yzmall.Api.Capablity.Resource.Account"];
+  var Yzmall_Api_Capablity_Resource_Address = PS["Yzmall.Api.Capablity.Resource.Address"];
+  var Yzmall_Api_Capablity_Resource_BankCard = PS["Yzmall.Api.Capablity.Resource.BankCard"];
+  var Yzmall_Api_Capablity_Resource_CommodityOrder = PS["Yzmall.Api.Capablity.Resource.CommodityOrder"];
+  var Yzmall_Capability_LogMessages = PS["Yzmall.Capability.LogMessages"];
+  var Yzmall_Capability_Navigate = PS["Yzmall.Capability.Navigate"];
+  var Yzmall_Capability_Now = PS["Yzmall.Capability.Now"];
+  var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
+  var Yzmall_Data_Route = PS["Yzmall.Data.Route"];
+  var Yzmall_Data_Route2 = PS["Yzmall.Data.Route2"];
+  var Yzmall_Page_AccountInfo = PS["Yzmall.Page.AccountInfo"];
+  var Yzmall_Page_AddressEditor = PS["Yzmall.Page.AddressEditor"];
+  var Yzmall_Page_AddressSelector = PS["Yzmall.Page.AddressSelector"];
+  var Yzmall_Page_BankCardEditor = PS["Yzmall.Page.BankCardEditor"];
+  var Yzmall_Page_BankCardSelector = PS["Yzmall.Page.BankCardSelector"];
+  var Yzmall_Page_MyOrders = PS["Yzmall.Page.MyOrders"];
+  var Yzmall_Page_PersonalCenter = PS["Yzmall.Page.PersonalCenter"];
+  var Yzmall_Resource_Commodity = PS["Yzmall.Resource.Commodity"];                 
+  var Navigate = (function () {
+      function Navigate(value0, value1) {
+          this.value0 = value0;
+          this.value1 = value1;
+      };
+      Navigate.create = function (value0) {
+          return function (value1) {
+              return new Navigate(value0, value1);
+          };
+      };
+      return Navigate;
+  })();
+  var Reset = (function () {
+      function Reset(value0, value1) {
+          this.value0 = value0;
+          this.value1 = value1;
+      };
+      Reset.create = function (value0) {
+          return function (value1) {
+              return new Reset(value0, value1);
+          };
+      };
+      return Reset;
+  })();
+  var Clear = (function () {
+      function Clear(value0) {
+          this.value0 = value0;
+      };
+      Clear.create = function (value0) {
+          return new Clear(value0);
+      };
+      return Clear;
+  })();
+  var component = function (dictMonadAff) {
+      return function (dictMonadAsk) {
+          return function (dictNow) {
+              return function (dictLogMessages) {
+                  return function (dictNavigate) {
+                      return function (dictManageAccount) {
+                          return function (dictManageCommodity) {
+                              return function (dictManageOrder) {
+                                  return function (dictManageAddress) {
+                                      return function (dictManageBankCard) {
+                                          var render = function (v) {
+                                              if (v.route instanceof Yzmall_Data_Route2.PersonalCenter) {
+                                                  return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp1)(Data_Unit.unit)(Yzmall_Page_PersonalCenter.component(dictMonadAff)(dictManageCommodity)(dictManageAccount)(dictManageOrder)(dictManageAddress)(dictMonadAsk)(dictNavigate))(Data_Unit.unit)(Data_Void.absurd);
+                                              };
+                                              if (v.route instanceof Yzmall_Data_Route2.AccountInfo) {
+                                                  return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp2)(Data_Unit.unit)(Yzmall_Page_AccountInfo.component(dictMonadAff)(dictManageCommodity)(dictManageAccount)(dictManageOrder)(dictManageAddress)(dictMonadAsk)(dictNavigate))(Data_Unit.unit)(Data_Void.absurd);
+                                              };
+                                              if (v.route instanceof Yzmall_Data_Route2.AddressEditor) {
+                                                  return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp3)(Data_Unit.unit)(Yzmall_Page_AddressEditor.component(dictMonadAff)(dictManageCommodity)(dictManageAccount)(dictManageOrder)(dictManageAddress)(dictMonadAsk)(dictNavigate))(Data_Unit.unit)(Data_Void.absurd);
+                                              };
+                                              if (v.route instanceof Yzmall_Data_Route2.BankCardEditor) {
+                                                  return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp4)(Data_Unit.unit)(Yzmall_Page_BankCardEditor.component(dictMonadAff)(dictManageCommodity)(dictManageAccount)(dictManageOrder)(dictManageBankCard)(dictMonadAsk)(dictNavigate))(Data_Unit.unit)(Data_Void.absurd);
+                                              };
+                                              if (v.route instanceof Yzmall_Data_Route2.MyOrders) {
+                                                  return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp5)(Data_Unit.unit)(Yzmall_Page_MyOrders.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageCommodity)(dictManageOrder)(dictManageAccount))(Data_Unit.unit)(Data_Void.absurd);
+                                              };
+                                              if (v.route instanceof Yzmall_Data_Route2.AddressSelector) {
+                                                  return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp6)(Data_Unit.unit)(Yzmall_Page_AddressSelector.component(dictMonadAff)(dictManageCommodity)(dictManageAccount)(dictManageOrder)(dictManageAddress)(dictMonadAsk)(dictNavigate))(Data_Unit.unit)(Data_Void.absurd);
+                                              };
+                                              if (v.route instanceof Yzmall_Data_Route2.BankCardSelector) {
+                                                  return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp7)(Data_Unit.unit)(Yzmall_Page_BankCardSelector.component(dictMonadAff)(dictManageCommodity)(dictManageAccount)(dictManageOrder)(dictManageBankCard)(dictMonadAsk)(dictNavigate))(Data_Unit.unit)(Data_Void.absurd);
+                                              };
+                                              throw new Error("Failed pattern match at Yzmall.Component.Router2 line 128, column 7 - line 142, column 50: " + [ v.route.constructor.name ]);
+                                          };
+                                          var $$eval = function (v) {
+                                              if (v instanceof Navigate) {
+                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.get(Halogen_Query_HalogenM.monadStateHalogenM))(function (v1) {
+                                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Applicative.when(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Eq.notEq(Yzmall_Data_Route2.eqRoute)(v1.route)(v.value0))(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v2) {
+                                                          var $23 = {};
+                                                          for (var $24 in v2) {
+                                                              if ({}.hasOwnProperty.call(v2, $24)) {
+                                                                  $23[$24] = v2[$24];
+                                                              };
+                                                          };
+                                                          $23.route = v.value0;
+                                                          return $23;
+                                                      })))(function () {
+                                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value1);
+                                                      });
+                                                  });
+                                              };
+                                              if (v instanceof Reset) {
+                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.get(Halogen_Query_HalogenM.monadStateHalogenM))(function (v1) {
+                                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Applicative.when(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Eq.notEq(Yzmall_Data_Route2.eqRoute)(v1.route)(v.value0))(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v2) {
+                                                          var $30 = {};
+                                                          for (var $31 in v2) {
+                                                              if ({}.hasOwnProperty.call(v2, $31)) {
+                                                                  $30[$31] = v2[$31];
+                                                              };
+                                                          };
+                                                          $30.route = v.value0;
+                                                          return $30;
+                                                      })))(function () {
+                                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value1);
+                                                      });
+                                                  });
+                                              };
+                                              if (v instanceof Clear) {
+                                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v1) {
+                                                      var $36 = {};
+                                                      for (var $37 in v1) {
+                                                          if ({}.hasOwnProperty.call(v1, $37)) {
+                                                              $36[$37] = v1[$37];
+                                                          };
+                                                      };
+                                                      $36.clear = true;
+                                                      return $36;
+                                                  }))(function () {
+                                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                                  });
+                                              };
+                                              throw new Error("Failed pattern match at Yzmall.Component.Router2 line 110, column 11 - line 123, column 13: " + [ v.constructor.name ]);
+                                          };
+                                          return Halogen_Component.parentComponent(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Ord.ordVoid))))))))({
+                                              initialState: function (initialRoute) {
+                                                  return {
+                                                      route: Data_Maybe.fromMaybe(Yzmall_Data_Route2.PersonalCenter.value)(initialRoute),
+                                                      clear: false
+                                                  };
+                                              },
+                                              render: render,
+                                              "eval": $$eval,
+                                              receiver: Data_Function["const"](Data_Maybe.Nothing.value)
+                                          });
+                                      };
+                                  };
+                              };
+                          };
+                      };
+                  };
+              };
+          };
+      };
+  };
+  exports["Navigate"] = Navigate;
+  exports["Reset"] = Reset;
+  exports["Clear"] = Clear;
+  exports["component"] = component;
+})(PS["Yzmall.Component.Router2"] = PS["Yzmall.Component.Router2"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Conduit_Component_Utils = PS["Conduit.Component.Utils"];
+  var Control_Applicative = PS["Control.Applicative"];
+  var Control_Apply = PS["Control.Apply"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Monad_Reader = PS["Control.Monad.Reader"];
+  var Control_Monad_Reader_Class = PS["Control.Monad.Reader.Class"];
+  var Control_Monad_State_Class = PS["Control.Monad.State.Class"];
+  var Data_Array = PS["Data.Array"];
+  var Data_Eq = PS["Data.Eq"];
+  var Data_Function = PS["Data.Function"];
+  var Data_Functor = PS["Data.Functor"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Data_Ord = PS["Data.Ord"];
+  var Data_Ordering = PS["Data.Ordering"];
+  var Data_Ring = PS["Data.Ring"];
+  var Data_Semigroup = PS["Data.Semigroup"];
+  var Data_Show = PS["Data.Show"];
+  var Data_Unit = PS["Data.Unit"];
+  var Data_Void = PS["Data.Void"];
+  var Effect = PS["Effect"];
+  var Effect_Aff_Class = PS["Effect.Aff.Class"];
+  var Effect_Class = PS["Effect.Class"];
+  var Effect_Ref = PS["Effect.Ref"];
+  var Halogen = PS["Halogen"];
+  var Halogen_Component = PS["Halogen.Component"];
+  var Halogen_HTML = PS["Halogen.HTML"];
+  var Halogen_HTML_Core = PS["Halogen.HTML.Core"];
+  var Halogen_HTML_Elements = PS["Halogen.HTML.Elements"];
+  var Halogen_HTML_Events = PS["Halogen.HTML.Events"];
+  var Halogen_HTML_Properties = PS["Halogen.HTML.Properties"];
+  var Halogen_Query = PS["Halogen.Query"];
+  var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
+  var Halogen_Themes_Bootstrap4 = PS["Halogen.Themes.Bootstrap4"];
+  var Network_RemoteData = PS["Network.RemoteData"];
+  var Prelude = PS["Prelude"];
+  var $$String = PS["String"];
+  var Yzmall_Api_Capablity_Resource_Account = PS["Yzmall.Api.Capablity.Resource.Account"];
   var Yzmall_Capability_Navigate = PS["Yzmall.Capability.Navigate"];
   var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
   var Yzmall_Data_Avatar = PS["Yzmall.Data.Avatar"];
@@ -32619,6 +38048,8 @@ var PS = {};
   var Yzmall_Data_Route = PS["Yzmall.Data.Route"];
   var Yzmall_Page_Part_Login = PS["Yzmall.Page.Part.Login"];
   var Yzmall_Page_Part_MobileMenu = PS["Yzmall.Page.Part.MobileMenu"];
+  var Yzmall_Page_Part_Navbar = PS["Yzmall.Page.Part.Navbar"];
+  var Yzmall_Page_Utils = PS["Yzmall.Page.Utils"];
   var Yzmall_Resource_Commodity = PS["Yzmall.Resource.Commodity"];
   var Yzmall_Utils = PS["Yzmall.Utils"];                 
   var Initialize = (function () {
@@ -32631,120 +38062,191 @@ var PS = {};
       return Initialize;
   })();
   var LoadCommodities = (function () {
-      function LoadCommodities(value0) {
+      function LoadCommodities(value0, value1) {
           this.value0 = value0;
+          this.value1 = value1;
       };
       LoadCommodities.create = function (value0) {
-          return new LoadCommodities(value0);
+          return function (value1) {
+              return new LoadCommodities(value0, value1);
+          };
       };
       return LoadCommodities;
   })();
-  var renderMenu = (function () {
-      var _renderImg = function (n) {
-          return function (imgSrc) {
-              return function (route) {
-                  var bordern = (function () {
-                      var $11 = n === 1;
-                      if ($11) {
-                          return Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.borderRight)(Halogen_Themes_Bootstrap4.borderLeft);
-                      };
-                      return Halogen_Themes_Bootstrap4.borderRight;
-                  })();
-                  return Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col4)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(bordern)(Halogen_Themes_Bootstrap4.mt2))), Conduit_Component_Utils.safeHref(route), Yzmall_Utils.style("height: 100px; background-image: url(" + (imgSrc + ");background-repeat: no-repeat; background-size: contain ; background-position: center center")) ])([  ]);
+  var Reset = (function () {
+      function Reset(value0, value1, value2) {
+          this.value0 = value0;
+          this.value1 = value1;
+          this.value2 = value2;
+      };
+      Reset.create = function (value0) {
+          return function (value1) {
+              return function (value2) {
+                  return new Reset(value0, value1, value2);
               };
           };
       };
-      return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.w100), Yzmall_Utils.style("background-image: url(" + ($$String.bgTuiGuang + "); background-position: top center;")) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.container), Yzmall_Utils.attr_("style")("height: 120px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.row)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Halogen_Themes_Bootstrap4.h100))) ])([ _renderImg(1)($$String.iconWdfx)(Yzmall_Data_Route.WDFX_ROUTE.value), _renderImg(2)($$String.iconWdtg)(Yzmall_Data_Route.WDTG_ROUTE.value), _renderImg(3)($$String.iconWdds)(Yzmall_Data_Route.WDDS_ROUTE.value) ]) ]) ]);
+      return Reset;
   })();
   var component = function (dictMonadAff) {
       return function (dictMonadAsk) {
           return function (dictNavigate) {
               return function (dictManageCommodity) {
-                  var render = function (state) {
-                      var renderCommodities = function (v) {
-                          if (v instanceof Network_RemoteData.NotAsked) {
-                              return [ Halogen_HTML_Core.text("commodities not loaded") ];
-                          };
-                          if (v instanceof Network_RemoteData.Loading) {
-                              return [ Halogen_HTML_Core.text("Loading commodities") ];
-                          };
-                          if (v instanceof Network_RemoteData.Failure) {
-                              return [ Halogen_HTML_Core.text("Failed loading commodities: " + v.value0) ];
-                          };
-                          if (v instanceof Network_RemoteData.Success) {
-                              return Yzmall_Utils.foreach_(v.value0)(Yzmall_Utils.renderCommodity);
-                          };
-                          throw new Error("Failed pattern match at Yzmall.Page.Commodity line 99, column 29 - line 107, column 41: " + [ v.constructor.name ]);
-                      };
-                      var cardInitialState = {
-                          title: "\u9738\u738b\u7fe1\u7fe0",
-                          content: $$String.cardContent,
-                          imgSrc: $$String.imgUrl,
-                          btnName: "Go somewhere"
-                      };
-                      return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Yzmall_Utils.renderNavBar, Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.py2)), Yzmall_Utils.style("background-image: url(" + ($$String.bgBanner + ")")) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Halogen_Themes_Bootstrap4.px0)) ])([ Yzmall_Utils.renderBanner([ $$String.banner1, $$String.banner2 ]) ]) ]), renderMenu, Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.bgTransparent)(Halogen_Themes_Bootstrap4.w100)) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Halogen_Themes_Bootstrap4.px0)) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.flexWrap)) ])(renderCommodities(state.commodities)) ]) ]), Yzmall_Utils.renderFooter, Yzmall_Page_Part_MobileMenu.forMobileMenu, Yzmall_Page_Part_MobileMenu.mobileMenu, Yzmall_Page_Part_Login.renderLoginModal, Yzmall_Page_Part_Login.renderRegisterModal ]);
-                  };
-                  var initialState = function (v) {
-                      return {
-                          currentAccount: Data_Maybe.Nothing.value,
-                          commodities: Network_RemoteData.NotAsked.value
-                      };
-                  };
-                  var $$eval = function (v) {
-                      if (v instanceof Initialize) {
-                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new LoadCommodities(v.value0)))))(function () {
-                              return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
-                          });
-                      };
-                      if (v instanceof LoadCommodities) {
-                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify(Halogen_Query_HalogenM.monadStateHalogenM)(function (v1) {
-                              var $17 = {};
-                              for (var $18 in v1) {
-                                  if ({}.hasOwnProperty.call(v1, $18)) {
-                                      $17[$18] = v1[$18];
-                                  };
+                  return function (dictManageAccount) {
+                      var render = function (state) {
+                          var renderCommodities = function (v) {
+                              if (v instanceof Network_RemoteData.NotAsked) {
+                                  return [ Halogen_HTML_Core.text("commodities not loaded") ];
                               };
-                              $17.commodities = Network_RemoteData.Loading.value;
-                              return $17;
-                          }))(function (v1) {
-                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Resource_Commodity.getCommodities(Yzmall_Resource_Commodity.manageCommodityHalogenM(dictManageCommodity))({
-                                  category: Data_Show.show(Yzmall_Data_Commodity.showCommodityCategory)(Yzmall_Data_Commodity.Regular.value),
-                                  page: Data_Maybe.Nothing.value,
-                                  size: Data_Maybe.Nothing.value
-                              }))(function (v2) {
-                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v3) {
-                                      var $22 = {};
-                                      for (var $23 in v3) {
-                                          if ({}.hasOwnProperty.call(v3, $23)) {
-                                              $22[$23] = v3[$23];
+                              if (v instanceof Network_RemoteData.Loading) {
+                                  return [ Halogen_HTML_Core.text("Loading commodities") ];
+                              };
+                              if (v instanceof Network_RemoteData.Failure) {
+                                  return [ Halogen_HTML_Core.text("Failed loading commodities: " + v.value0) ];
+                              };
+                              if (v instanceof Network_RemoteData.Success) {
+                                  return Yzmall_Utils.foreach_(Data_Array.sortBy(function (a) {
+                                      return function (b) {
+                                          var $20 = (b.id - a.id | 0) > 0;
+                                          if ($20) {
+                                              return Data_Ordering.GT.value;
                                           };
+                                          return Data_Ordering.LT.value;
                                       };
-                                      $22.commodities = Network_RemoteData.fromMaybe(v2);
-                                      return $22;
-                                  }))(function () {
-                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                  })(Data_Array.filter(function (x) {
+                                      return x.onSale;
+                                  })(v.value0)))(Yzmall_Utils.renderCommodity);
+                              };
+                              throw new Error("Failed pattern match at Yzmall.Page.Commodity line 118, column 29 - line 126, column 123: " + [ v.constructor.name ]);
+                          };
+                          var cardInitialState = {
+                              title: "\u9738\u738b\u7fe1\u7fe0",
+                              content: $$String.cardContent,
+                              imgSrc: $$String.imgUrl,
+                              btnName: "Go somewhere"
+                          };
+                          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Halogen_HTML.slot(Data_Unit.unit)(Yzmall_Page_Part_Navbar.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageAccount))({
+                              page: (function () {
+                                  if (state.isRegular) {
+                                      return Yzmall_Page_Part_Navbar.First.value;
+                                  };
+                                  return Yzmall_Page_Part_Navbar.Second.value;
+                              })()
+                          })(Data_Void.absurd), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.py2)), Yzmall_Utils.style("background-image: url(" + ($$String.bgBanner + ")")) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Halogen_Themes_Bootstrap4.px0)) ])([ Yzmall_Utils.renderBanner ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.bgTransparent)(Halogen_Themes_Bootstrap4.w100)) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Halogen_Themes_Bootstrap4.px0)) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.flexWrap)) ])(renderCommodities(state.commodities)) ]) ]), Yzmall_Utils.renderFooter, Yzmall_Page_Part_MobileMenu.forMobileMenu, Yzmall_Page_Part_MobileMenu.mobileMenu((function () {
+                              if (state.isRegular) {
+                                  return Yzmall_Page_Part_Navbar.First.value;
+                              };
+                              return Yzmall_Page_Part_Navbar.Second.value;
+                          })()) ]);
+                      };
+                      var initialState = function (v) {
+                          return {
+                              currentAccount: Data_Maybe.Nothing.value,
+                              commodities: Network_RemoteData.NotAsked.value,
+                              isRegular: v.isRegular,
+                              hometype: v.hometype
+                          };
+                      };
+                      var $$eval = function (v) {
+                          if (v instanceof Initialize) {
+                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.get(Halogen_Query_HalogenM.monadStateHalogenM))(function (v1) {
+                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new LoadCommodities(v1.isRegular, v.value0)))))(function () {
+                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_Reader_Class.ask(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk)))(function (v2) {
+                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Effect_Ref.read(v2.currentAccount)))(function (v3) {
+                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Applicative.when(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Eq.eq(Yzmall_Data_Route.eqHomeType)(v1.hometype)(Yzmall_Data_Route.BindAlipay.value))(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Control_Apply.applySecond(Effect.applyEffect)(Control_Apply.applySecond(Effect.applyEffect)(Yzmall_Page_Utils.closeRegisterModal)(Yzmall_Page_Utils.closeLoginModal))(Yzmall_Page_Utils.openBindAlipayModal))))(function () {
+                                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Applicative.when(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Maybe.isNothing(v3))((function () {
+                                                      if (v1.hometype instanceof Yzmall_Data_Route.NormalHome) {
+                                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                                      };
+                                                      if (v1.hometype instanceof Yzmall_Data_Route.LoginHome) {
+                                                          return Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Control_Apply.applySecond(Effect.applyEffect)(Yzmall_Page_Utils.closeRegisterModal)(Yzmall_Page_Utils.openLoginModal));
+                                                      };
+                                                      if (v1.hometype instanceof Yzmall_Data_Route.RegisterHome) {
+                                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInviterId))(function (v4) {
+                                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.closeLoginModal))(function () {
+                                                                  return Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.openRegisterModal(v4));
+                                                              });
+                                                          });
+                                                      };
+                                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                                  })()))(function () {
+                                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                                  });
+                                              });
+                                          });
+                                      });
                                   });
                               });
-                          });
+                          };
+                          if (v instanceof LoadCommodities) {
+                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify(Halogen_Query_HalogenM.monadStateHalogenM)(function (v1) {
+                                  var $35 = {};
+                                  for (var $36 in v1) {
+                                      if ({}.hasOwnProperty.call(v1, $36)) {
+                                          $35[$36] = v1[$36];
+                                      };
+                                  };
+                                  $35.commodities = Network_RemoteData.Loading.value;
+                                  return $35;
+                              }))(function (v1) {
+                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Resource_Commodity.getCommodities(Yzmall_Resource_Commodity.manageCommodityHalogenM(dictManageCommodity))({
+                                      category: Data_Show.show(Yzmall_Data_Commodity.showCommodityCategory)((function () {
+                                          if (v.value0) {
+                                              return Yzmall_Data_Commodity.Regular.value;
+                                          };
+                                          return Yzmall_Data_Commodity.Special.value;
+                                      })()),
+                                      page: Data_Maybe.Nothing.value,
+                                      size: Data_Maybe.Nothing.value
+                                  }))(function (v2) {
+                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v3) {
+                                          var $41 = {};
+                                          for (var $42 in v3) {
+                                              if ({}.hasOwnProperty.call(v3, $42)) {
+                                                  $41[$42] = v3[$42];
+                                              };
+                                          };
+                                          $41.commodities = Network_RemoteData.fromMaybe(v2);
+                                          return $41;
+                                      }))(function () {
+                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value1);
+                                      });
+                                  });
+                              });
+                          };
+                          if (v instanceof Reset) {
+                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.put(Halogen_Query_HalogenM.monadStateHalogenM)({
+                                  currentAccount: Data_Maybe.Nothing.value,
+                                  commodities: Network_RemoteData.NotAsked.value,
+                                  isRegular: v.value0,
+                                  hometype: v.value1
+                              }))(function () {
+                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Halogen_Query.query(Data_Eq.eqUnit)(Data_Unit.unit)(Halogen_Query.action(Yzmall_Page_Part_Navbar.Reset.create(v.value0))))(function (v1) {
+                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new Initialize(v.value2)))))(function () {
+                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value2);
+                                      });
+                                  });
+                              });
+                          };
+                          throw new Error("Failed pattern match at Yzmall.Page.Commodity line 129, column 12 - line 161, column 15: " + [ v.constructor.name ]);
                       };
-                      throw new Error("Failed pattern match at Yzmall.Page.Commodity line 110, column 12 - line 118, column 15: " + [ v.constructor.name ]);
+                      return Halogen_Component.lifecycleParentComponent(Data_Ord.ordUnit)({
+                          initialState: initialState,
+                          render: render,
+                          "eval": $$eval,
+                          receiver: Data_Function["const"](Data_Maybe.Nothing.value),
+                          initializer: Data_Maybe.Just.create(Halogen_Query.action(Initialize.create)),
+                          finalizer: Data_Maybe.Nothing.value
+                      });
                   };
-                  return Halogen_Component.lifecycleComponent(Halogen_HTML_Core.bifunctorHTML)({
-                      initialState: initialState,
-                      render: render,
-                      "eval": $$eval,
-                      receiver: Data_Function["const"](Data_Maybe.Nothing.value),
-                      initializer: Data_Maybe.Just.create(Halogen_Query.action(Initialize.create)),
-                      finalizer: Data_Maybe.Nothing.value
-                  });
               };
           };
       };
   };
   exports["Initialize"] = Initialize;
   exports["LoadCommodities"] = LoadCommodities;
+  exports["Reset"] = Reset;
   exports["component"] = component;
-  exports["renderMenu"] = renderMenu;
 })(PS["Yzmall.Page.Commodity"] = PS["Yzmall.Page.Commodity"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
@@ -32762,8 +38264,11 @@ var PS = {};
   var Data_Lens_Internal_Forget = PS["Data.Lens.Internal.Forget"];
   var Data_Maybe = PS["Data.Maybe"];
   var Data_Maybe_First = PS["Data.Maybe.First"];
+  var Data_Ord = PS["Data.Ord"];
   var Data_Semigroup = PS["Data.Semigroup"];
   var Data_Show = PS["Data.Show"];
+  var Data_Unit = PS["Data.Unit"];
+  var Data_Void = PS["Data.Void"];
   var Effect_Aff_Class = PS["Effect.Aff.Class"];
   var Effect_Ref = PS["Effect.Ref"];
   var Halogen = PS["Halogen"];
@@ -32777,6 +38282,7 @@ var PS = {};
   var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
   var Halogen_Themes_Bootstrap4 = PS["Halogen.Themes.Bootstrap4"];
   var Network_RemoteData = PS["Network.RemoteData"];
+  var Partial_Unsafe = PS["Partial.Unsafe"];
   var Prelude = PS["Prelude"];
   var Slug = PS["Slug"];
   var $$String = PS["String"];
@@ -32785,8 +38291,10 @@ var PS = {};
   var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
   var Yzmall_Data_Avatar = PS["Yzmall.Data.Avatar"];
   var Yzmall_Data_Commodity = PS["Yzmall.Data.Commodity"];
+  var Yzmall_Data_Route = PS["Yzmall.Data.Route"];
   var Yzmall_Page_Part_Login = PS["Yzmall.Page.Part.Login"];
   var Yzmall_Page_Part_MobileMenu = PS["Yzmall.Page.Part.MobileMenu"];
+  var Yzmall_Page_Part_Navbar = PS["Yzmall.Page.Part.Navbar"];
   var Yzmall_Page_Utils = PS["Yzmall.Page.Utils"];
   var Yzmall_Resource_Commodity = PS["Yzmall.Resource.Commodity"];
   var Yzmall_Utils = PS["Yzmall.Utils"];                 
@@ -32826,23 +38334,55 @@ var PS = {};
               return function (dictMonadAsk) {
                   return function (dictNavigate) {
                       var render = function (state) {
+                          var renderNavbar$prime = function (commodity) {
+                              return Halogen_HTML.slot(Data_Unit.unit)(Yzmall_Page_Part_Navbar.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageAccount))({
+                                  page: (function () {
+                                      var $13 = Data_Eq.eq(Yzmall_Data_Commodity.eqCommodityCategory)(Yzmall_Data_Commodity.Special.value)(commodity.category);
+                                      if ($13) {
+                                          return Yzmall_Page_Part_Navbar.Second.value;
+                                      };
+                                      return Yzmall_Page_Part_Navbar.First.value;
+                                  })()
+                              })(Data_Void.absurd);
+                          };
+                          var purchaseBtn = function (commodity) {
+                              return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Yzmall_Page_Utils.mobileOnly) ])([ Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.fixedBottom)))), Yzmall_Utils.style("font-size: 24px"), Conduit_Component_Utils.safeHref((function () {
+                                  var $14 = Data_Eq.eq(Yzmall_Data_Commodity.eqCommodityCategory)(commodity.category)(Yzmall_Data_Commodity.Regular.value);
+                                  if ($14) {
+                                      return Yzmall_Data_Route.PurchaseConfirm.create;
+                                  };
+                                  return Yzmall_Data_Route.SpecialPurchaseConfirm.create;
+                              })()(Data_Maybe.fromJust()(Slug.generate(Data_Show.show(Data_Show.showInt)(commodity.id))))) ])([ Halogen_HTML_Core.text("\u7acb\u5373\u8d2d\u4e70") ]) ]);
+                          };
                           var pcDiv = function (commodity) {
                               return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.row)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mt2)(Yzmall_Page_Utils.pcOnly)))))), Yzmall_Utils.style("height:470px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd8)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col12)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.pl0)(Halogen_Themes_Bootstrap4.h100)))), Yzmall_Utils.style("background-image: url(" + (commodity.thumbnail + "); background-position: center center; background-size: cover")) ])([  ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd4)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.pr0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Halogen_Themes_Bootstrap4.h100))))) ])([ Halogen_HTML_Elements.h3([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.textWhite) ])([ Halogen_HTML_Core.text(commodity.name) ]), Halogen_HTML_Elements.h2([ Yzmall_Utils.style(Yzmall_Page_Utils.yellowColor) ])([ Halogen_HTML_Core.text("\uffe5" + (Data_Show.show(Data_Show.showNumber)(commodity.price) + "\u5143")) ]), Halogen_HTML_Elements.h5([ Yzmall_Utils.style(Yzmall_Page_Utils.yellowColor) ])([ Halogen_HTML_Core.text("(" + ((function () {
-                                  var $11 = Data_Eq.eq(Yzmall_Data_Commodity.eqCommodityCategory)(commodity.category)(Yzmall_Data_Commodity.Regular.value);
-                                  if ($11) {
-                                      return "\u9700\u6d88\u8017";
+                                  var $15 = Data_Eq.eq(Yzmall_Data_Commodity.eqCommodityCategory)(commodity.category)(Yzmall_Data_Commodity.Regular.value);
+                                  if ($15) {
+                                      return "\u53ef\u83b7\u5f97";
                                   };
-                                  return "\u53ef\u83b7\u5f97";
-                              })() + (Data_Show.show(Data_Show.showNumber)(commodity.gold) + "\u91d1\u5e01)"))) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.pt2)(Halogen_Themes_Bootstrap4.mbAuto))))), Yzmall_Utils.style("border-top: 1px dashed #f8f2d8") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mb4) ])([ Halogen_HTML_Core.text("\u8fd0\u8d39: \u5305\u90ae") ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mb4) ])([ Halogen_HTML_Core.text("\u9500\u91cf: " + Data_Show.show(Data_Show.showInt)(commodity.sale)) ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text("\u5e93\u5b58: " + Data_Show.show(Data_Show.showInt)(commodity.stock)) ]) ]), Halogen_HTML_Elements.button([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.rounded0)(Halogen_Themes_Bootstrap4.pt0))))), Yzmall_Utils.style("font-size: 38px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.myAuto) ])([ Halogen_HTML_Core.text("\u7acb\u5373\u8d2d\u4e70") ]) ]) ]) ]);
+                                  return "\u9700\u6d88\u8017";
+                              })() + (Data_Show.show(Data_Show.showNumber)(commodity.gold) + "\u91d1\u5e01)"))) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.pt2)(Halogen_Themes_Bootstrap4.mbAuto))))), Yzmall_Utils.style("border-top: 1px dashed #f8f2d8") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mb4) ])([ Halogen_HTML_Core.text("\u8fd0\u8d39: \u5305\u90ae") ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mb4) ])([ Halogen_HTML_Core.text("\u9500\u91cf: " + Data_Show.show(Data_Show.showInt)(commodity.sale)) ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text("\u5e93\u5b58: " + Data_Show.show(Data_Show.showInt)(commodity.stock)) ]) ]), Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.rounded0)(Halogen_Themes_Bootstrap4.pt0))))), Yzmall_Utils.style("font-size: 38px"), Conduit_Component_Utils.safeHref((function () {
+                                  var $16 = Data_Eq.eq(Yzmall_Data_Commodity.eqCommodityCategory)(commodity.category)(Yzmall_Data_Commodity.Regular.value);
+                                  if ($16) {
+                                      return Yzmall_Data_Route.PurchaseConfirm.create;
+                                  };
+                                  return Yzmall_Data_Route.SpecialPurchaseConfirm.create;
+                              })()(Data_Maybe.fromJust()(Slug.generate(Data_Show.show(Data_Show.showInt)(commodity.id))))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.myAuto) ])([ Halogen_HTML_Core.text("\u7acb\u5373\u8d2d\u4e70") ]) ]) ]) ]);
                           };
                           var mobileDiv = function (commodity) {
-                              return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Yzmall_Page_Utils.mobileOnly)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Halogen_Themes_Bootstrap4.mxAuto))))) ])([ Halogen_HTML_Elements.img([ Halogen_HTML_Properties.src(commodity.thumbnail), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mw100) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.bgDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px1)(Halogen_Themes_Bootstrap4.mb2)))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.floatLeft)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.h3)(Halogen_Themes_Bootstrap4.my1)))) ])([ Halogen_HTML_Core.text("\uffe5" + (Data_Show.show(Data_Show.showNumber)(commodity.price) + "\u5143")) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.floatRight)(Halogen_Themes_Bootstrap4.mt2)), Yzmall_Utils.style("color: #f8f2d8") ])([ Halogen_HTML_Core.text("\uff08\u9700\u6d88\u8017" + (Data_Show.show(Data_Show.showNumber)(commodity.gold) + "\u91d1\u5e01\uff09")) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.row)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Halogen_Themes_Bootstrap4.mxAuto)))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col7)(Halogen_Themes_Bootstrap4.px1)) ])([ Halogen_HTML_Elements.h4([ Yzmall_Utils.style("color: #f8f2d8") ])([ Halogen_HTML_Core.text(commodity.name) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.pt2)(Halogen_Themes_Bootstrap4.textWhite))), Yzmall_Utils.style("border-top: 1px dashed #f8f2d8") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mb1) ])([ Halogen_HTML_Core.text("\u8fd0\u8d39: \u5305\u90ae") ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mb1) ])([ Halogen_HTML_Core.text("\u9500\u91cf: " + Data_Show.show(Data_Show.showInt)(commodity.sale)) ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text("\u5e93\u5b58: " + Data_Show.show(Data_Show.showInt)(commodity.stock)) ]) ]) ]) ]) ]);
+                              return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Yzmall_Page_Utils.mobileOnly)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Halogen_Themes_Bootstrap4.mxAuto))))) ])([ Halogen_HTML_Elements.img([ Halogen_HTML_Properties.src(commodity.thumbnail), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mw100) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.bgDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px1)(Halogen_Themes_Bootstrap4.mb2)))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.floatLeft)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.h3)(Halogen_Themes_Bootstrap4.my1)))) ])([ Halogen_HTML_Core.text("\uffe5" + (Data_Show.show(Data_Show.showNumber)(commodity.price) + "\u5143")) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.floatRight)(Halogen_Themes_Bootstrap4.mt2)), Yzmall_Utils.style("color: #f8f2d8") ])([ Halogen_HTML_Core.text("\uff08" + ((function () {
+                                  var $17 = Data_Eq.eq(Yzmall_Data_Commodity.eqCommodityCategory)(commodity.category)(Yzmall_Data_Commodity.Regular.value);
+                                  if ($17) {
+                                      return "\u53ef\u83b7\u5f97";
+                                  };
+                                  return "\u9700\u6d88\u8017";
+                              })() + (Data_Show.show(Data_Show.showNumber)(commodity.gold) + "\u91d1\u5e01\uff09"))) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.row)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Halogen_Themes_Bootstrap4.mxAuto)))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col12)(Halogen_Themes_Bootstrap4.px1)) ])([ Halogen_HTML_Elements.h4([ Yzmall_Utils.style("color: #f8f2d8") ])([ Halogen_HTML_Core.text(commodity.name) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.pt2)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Halogen_Themes_Bootstrap4.flexColumn)))), Yzmall_Utils.style("border-top: 1px dashed #f8f2d8") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb1)(Halogen_Themes_Bootstrap4.dFlex)) ])([ Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text("\u8fd0\u8d39: \u5305\u90ae") ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto) ])([ Halogen_HTML_Core.text("\u9500\u91cf: " + Data_Show.show(Data_Show.showInt)(commodity.sale)) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.dFlex)) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto) ])([ Halogen_HTML_Core.text("\u5e93\u5b58: " + Data_Show.show(Data_Show.showInt)(commodity.stock)) ]) ]) ]) ]) ]) ]);
                           };
                           var mbCommodity = Data_Lens_Fold.preview(Network_RemoteData._Success(Data_Lens_Internal_Forget.choiceForget(Data_Maybe_First.monoidFirst)))(state.commodity);
                           var info = function (commodity) {
                               return Halogen_HTML_Elements.img([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.w100), Halogen_HTML_Properties.src(commodity.picture) ]);
                           };
-                          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Yzmall_Utils.renderNavBar, Conduit_Component_Utils.maybeElem(mbCommodity)(pcDiv), Conduit_Component_Utils.maybeElem(mbCommodity)(mobileDiv), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Halogen_Themes_Bootstrap4.h100))))) ])([ Halogen_HTML_Elements.img([ Halogen_HTML_Properties.src($$String.bgInfoTitle), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.py2)) ]), Conduit_Component_Utils.maybeElem(mbCommodity)(info) ]), Yzmall_Utils.renderFooter, Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Yzmall_Page_Utils.mobileOnly), Yzmall_Utils.style("height: 50px") ])([  ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Yzmall_Page_Utils.mobileOnly) ])([ Halogen_HTML_Elements.button([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.fixedBottom)))), Yzmall_Utils.style("font-size: 24px") ])([ Halogen_HTML_Core.text("\u7acb\u5373\u8d2d\u4e70") ]) ]), Yzmall_Page_Part_Login.renderLoginModal, Yzmall_Page_Part_Login.renderRegisterModal ]);
+                          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Conduit_Component_Utils.maybeElem(mbCommodity)(renderNavbar$prime), Conduit_Component_Utils.maybeElem(mbCommodity)(pcDiv), Conduit_Component_Utils.maybeElem(mbCommodity)(mobileDiv), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Halogen_Themes_Bootstrap4.h100))))) ])([ Halogen_HTML_Elements.img([ Halogen_HTML_Properties.src($$String.bgInfoTitle), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.py2)) ]), Conduit_Component_Utils.maybeElem(mbCommodity)(info) ]), Yzmall_Utils.renderFooter, Conduit_Component_Utils.maybeElem(mbCommodity)(purchaseBtn) ]);
                       };
                       var initialState = function (v) {
                           return {
@@ -32858,25 +38398,25 @@ var PS = {};
                           };
                           if (v instanceof GetCommodity) {
                               return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify(Halogen_Query_HalogenM.monadStateHalogenM)(function (v1) {
-                                  var $16 = {};
-                                  for (var $17 in v1) {
-                                      if ({}.hasOwnProperty.call(v1, $17)) {
-                                          $16[$17] = v1[$17];
+                                  var $22 = {};
+                                  for (var $23 in v1) {
+                                      if ({}.hasOwnProperty.call(v1, $23)) {
+                                          $22[$23] = v1[$23];
                                       };
                                   };
-                                  $16.commodity = Network_RemoteData.Loading.value;
-                                  return $16;
+                                  $22.commodity = Network_RemoteData.Loading.value;
+                                  return $22;
                               }))(function (v1) {
                                   return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Resource_Commodity.getCommodity(Yzmall_Resource_Commodity.manageCommodityHalogenM(dictManageCommodity))(v1.slug))(function (v2) {
                                       return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v3) {
-                                          var $21 = {};
-                                          for (var $22 in v3) {
-                                              if ({}.hasOwnProperty.call(v3, $22)) {
-                                                  $21[$22] = v3[$22];
+                                          var $27 = {};
+                                          for (var $28 in v3) {
+                                              if ({}.hasOwnProperty.call(v3, $28)) {
+                                                  $27[$28] = v3[$28];
                                               };
                                           };
-                                          $21.commodity = Network_RemoteData.fromMaybe(v2);
-                                          return $21;
+                                          $27.commodity = Network_RemoteData.fromMaybe(v2);
+                                          return $27;
                                       }))(function () {
                                           return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
                                       });
@@ -32886,9 +38426,9 @@ var PS = {};
                           if (v instanceof PurchaseCommodity) {
                               return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value1);
                           };
-                          throw new Error("Failed pattern match at Yzmall.Page.CommodityInfo line 68, column 10 - line 78, column 13: " + [ v.constructor.name ]);
+                          throw new Error("Failed pattern match at Yzmall.Page.CommodityInfo line 75, column 10 - line 85, column 13: " + [ v.constructor.name ]);
                       };
-                      return Halogen_Component.lifecycleComponent(Halogen_HTML_Core.bifunctorHTML)({
+                      return Halogen_Component.lifecycleParentComponent(Data_Ord.ordUnit)({
                           initialState: initialState,
                           render: render,
                           "eval": $$eval,
@@ -32909,12 +38449,25 @@ var PS = {};
 (function(exports) {
   // Generated by purs version 0.12.1
   "use strict";
+  var Conduit_Component_Utils = PS["Conduit.Component.Utils"];
   var Control_Applicative = PS["Control.Applicative"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Monad_Reader = PS["Control.Monad.Reader"];
+  var Control_Monad_State = PS["Control.Monad.State"];
+  var Control_Monad_State_Class = PS["Control.Monad.State.Class"];
+  var Data_Eq = PS["Data.Eq"];
   var Data_Function = PS["Data.Function"];
   var Data_Functor = PS["Data.Functor"];
+  var Data_Lens = PS["Data.Lens"];
   var Data_Maybe = PS["Data.Maybe"];
+  var Data_Ord = PS["Data.Ord"];
   var Data_Semigroup = PS["Data.Semigroup"];
-  var Data_Tuple = PS["Data.Tuple"];
+  var Data_Show = PS["Data.Show"];
+  var Data_Unit = PS["Data.Unit"];
+  var Data_Void = PS["Data.Void"];
+  var Effect_Aff_Class = PS["Effect.Aff.Class"];
+  var Effect_Class = PS["Effect.Class"];
+  var Effect_Ref = PS["Effect.Ref"];
   var Halogen = PS["Halogen"];
   var Halogen_Component = PS["Halogen.Component"];
   var Halogen_HTML = PS["Halogen.HTML"];
@@ -32922,55 +38475,858 @@ var PS = {};
   var Halogen_HTML_Elements = PS["Halogen.HTML.Elements"];
   var Halogen_HTML_Events = PS["Halogen.HTML.Events"];
   var Halogen_HTML_Properties = PS["Halogen.HTML.Properties"];
+  var Halogen_Query = PS["Halogen.Query"];
   var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
   var Halogen_Themes_Bootstrap4 = PS["Halogen.Themes.Bootstrap4"];
+  var Network_RemoteData = PS["Network.RemoteData"];
   var Prelude = PS["Prelude"];
+  var $$String = PS["String"];
+  var Type_Data_Boolean = PS["Type.Data.Boolean"];
+  var Yzmalal_Data_CommodityOrder = PS["Yzmalal.Data.CommodityOrder"];
+  var Yzmall_Api_Capablity_Resource_Account = PS["Yzmall.Api.Capablity.Resource.Account"];
+  var Yzmall_Api_Capablity_Resource_Address = PS["Yzmall.Api.Capablity.Resource.Address"];
+  var Yzmall_Api_Capablity_Resource_BankCard = PS["Yzmall.Api.Capablity.Resource.BankCard"];
+  var Yzmall_Api_Capablity_Resource_CommodityOrder = PS["Yzmall.Api.Capablity.Resource.CommodityOrder"];
+  var Yzmall_Capability_Navigate = PS["Yzmall.Capability.Navigate"];
   var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
-  var Yzmall_Utils = PS["Yzmall.Utils"];                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  
-  var renderItem = function (v) {
-      var renderRight = function (str) {
-          if (str instanceof Data_Maybe.Just) {
-              return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto) ])([ Halogen_HTML_Core.text(str.value0), Halogen_HTML_Elements.i([ Yzmall_Utils.cls(Yzmall_Utils.append(Halogen_Themes_Bootstrap4.ml2)("fas fa-chevron-right")) ])([  ]) ]);
+  var Yzmall_Data_BankCard = PS["Yzmall.Data.BankCard"];
+  var Yzmall_Data_Route = PS["Yzmall.Data.Route"];
+  var Yzmall_Data_Route2 = PS["Yzmall.Data.Route2"];
+  var Yzmall_Page_Part_Login = PS["Yzmall.Page.Part.Login"];
+  var Yzmall_Page_Part_MobileMenu = PS["Yzmall.Page.Part.MobileMenu"];
+  var Yzmall_Page_Part_Navbar = PS["Yzmall.Page.Part.Navbar"];
+  var Yzmall_Page_Utils = PS["Yzmall.Page.Utils"];
+  var Yzmall_Resource_Commodity = PS["Yzmall.Resource.Commodity"];
+  var Yzmall_Utils = PS["Yzmall.Utils"];                 
+  var Initialize = (function () {
+      function Initialize(value0) {
+          this.value0 = value0;
+      };
+      Initialize.create = function (value0) {
+          return new Initialize(value0);
+      };
+      return Initialize;
+  })();
+  var GetBankCard = (function () {
+      function GetBankCard(value0) {
+          this.value0 = value0;
+      };
+      GetBankCard.create = function (value0) {
+          return new GetBankCard(value0);
+      };
+      return GetBankCard;
+  })();
+  var GetOrder = (function () {
+      function GetOrder(value0) {
+          this.value0 = value0;
+      };
+      GetOrder.create = function (value0) {
+          return new GetOrder(value0);
+      };
+      return GetOrder;
+  })();
+  var GetVcode = (function () {
+      function GetVcode(value0) {
+          this.value0 = value0;
+      };
+      GetVcode.create = function (value0) {
+          return new GetVcode(value0);
+      };
+      return GetVcode;
+  })();
+  var Uploading = (function () {
+      function Uploading() {
+
+      };
+      Uploading.value = new Uploading();
+      return Uploading;
+  })();
+  var OJBK = (function () {
+      function OJBK() {
+
+      };
+      OJBK.value = new OJBK();
+      return OJBK;
+  })();
+  var eqPayBtnState = new Data_Eq.Eq(function (x) {
+      return function (y) {
+          if (x instanceof Uploading && y instanceof Uploading) {
+              return true;
           };
-          if (str instanceof Data_Maybe.Nothing) {
-              return Halogen_HTML_Elements.i([ Yzmall_Utils.cls(Yzmall_Utils.append(Halogen_Themes_Bootstrap4.mlAuto)("fas fa-chevron-right")) ])([  ]);
+          if (x instanceof OJBK && y instanceof OJBK) {
+              return true;
           };
-          throw new Error("Failed pattern match at Yzmall.Page.PersonalCenter line 94, column 5 - line 106, column 11: " + [ str.constructor.name ]);
+          return false;
       };
-      return Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItem)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemAction)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroupItemLight)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.alignItemsCenter)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px4)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.borderBottom)(Halogen_Themes_Bootstrap4.rounded0)))))))), Yzmall_Utils.style("color: #5c5c5c"), Halogen_HTML_Properties.href("#") ])([ Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text(v.value0) ]), renderRight(v.value1) ]);
-  };
-  var renderListGroup = function (arr) {
-      return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.listGroup)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb3)(Halogen_Themes_Bootstrap4.mxAuto))), Yzmall_Utils.style("max-width: 600px") ])(Data_Functor.map(Data_Functor.functorArray)(renderItem)(arr));
-  };
-  var component = function (account) {
-      var itemNames = [ [ new Data_Tuple.Tuple("\u586b\u5199\u90ae\u5bc4\u5730\u5740", Data_Maybe.Nothing.value) ], [ Data_Tuple.Tuple.create("\u4f59\u989d")(new Data_Maybe.Just("0.00")), Data_Tuple.Tuple.create("\u91d1\u5e01\u6570")(new Data_Maybe.Just("0")) ], [ new Data_Tuple.Tuple("\u6211\u7684\u8ba2\u5355", Data_Maybe.Nothing.value) ], [ new Data_Tuple.Tuple("\u7cfb\u7edf\u516c\u544a", Data_Maybe.Nothing.value), new Data_Tuple.Tuple("\u6d88\u606f\u901a\u77e5", Data_Maybe.Nothing.value), new Data_Tuple.Tuple("\u95ee\u9898\u53cd\u9988", Data_Maybe.Nothing.value) ], [ Data_Tuple.Tuple.create("\u5173\u4e8e\u6211\u4eec")(new Data_Maybe.Just("1.0.10")), new Data_Tuple.Tuple("\u9000\u6362\u8d27\u653f\u7b56", Data_Maybe.Nothing.value), new Data_Tuple.Tuple("\u8d2d\u7269\u6d41\u7a0b", Data_Maybe.Nothing.value), new Data_Tuple.Tuple("\u4fdd\u5b9a\u7965\u7434\u7f51\u7edc\u79d1\u6280\u6709\u9650\u516c\u53f8\xae \u7248\u6743\u6240\u6709", Data_Maybe.Nothing.value) ] ];
-      var render = function (v) {
-          return Halogen_HTML_Elements.div([ Yzmall_Utils.style("background-color: #EFEFF3"), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.w100) ])(Data_Functor.map(Data_Functor.functorArray)(renderListGroup)(itemNames));
+  });
+  var component = function (dictMonadAff) {
+      return function (dictManageCommodity) {
+          return function (dictManageAccount) {
+              return function (dictManageOrder) {
+                  return function (dictManageAddress) {
+                      return function (dictManageBankCard) {
+                          return function (dictMonadAsk) {
+                              return function (dictNavigate) {
+                                  var render = function (state) {
+                                      var vcodeInput = function (v) {
+                                          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.inputGroup)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Halogen_Themes_Bootstrap4.mt3))) ])([ Halogen_HTML_Elements.input([ Yzmall_Utils.attr_("type")("text"), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formControl), Yzmall_Utils.attr_("placeholder")("\u8f93\u5165\u9a8c\u8bc1\u7801"), Yzmall_Utils.attr_("id")("pay_input") ]) ]);
+                                      };
+                                      var page = (function () {
+                                          if (state.isRegular) {
+                                              return Yzmall_Page_Part_Navbar.First.value;
+                                          };
+                                          return Yzmall_Page_Part_Navbar.Second.value;
+                                      })();
+                                      return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Halogen_HTML.slot(Data_Unit.unit)(Yzmall_Page_Part_Navbar.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageAccount))({
+                                          page: page
+                                      })(Data_Void.absurd), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Halogen_Themes_Bootstrap4.textWhite))), Yzmall_Utils.style("min-height: 633px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.py2)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.justifyContentCenter)))), Yzmall_Utils.style("background-color: #303030") ])([ Halogen_HTML_Elements.img([ Yzmall_Utils.style("max-width: 260px; max-height: 260px"), Halogen_HTML_Properties.src("./image/pay_banner.png") ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mt3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.px3)))) ])([ Halogen_HTML_Core.text("\u5546\u54c1\u540d\u79f0: " + state.commodityName) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mt3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.px3)))) ])([ Halogen_HTML_Core.text("\u4ef7\u683c: " + state.priceDesc) ]), Conduit_Component_Utils.maybeElem(state.showVcode)(vcodeInput), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.px3)) ])([ Halogen_HTML_Elements.button([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.py2)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mt3)(Halogen_Themes_Bootstrap4.mb3))))))), Halogen_HTML_Events.onClick(Halogen_HTML_Events.input_(GetOrder.create)), Halogen_HTML_Properties.disabled(Data_Eq.eq(eqPayBtnState)(state.payBtnState)(Uploading.value)) ])([ Halogen_HTML_Core.text((function () {
+                                          if (state.payBtnState instanceof OJBK) {
+                                              var $30 = Data_Maybe.isJust(state.showVcode);
+                                              if ($30) {
+                                                  return "\u8f93\u5165\u9a8c\u8bc1\u7801\u540e\u786e\u8ba4";
+                                              };
+                                              return "\u786e\u8ba4\u8d2d\u4e70";
+                                          };
+                                          if (state.payBtnState instanceof Uploading) {
+                                              return "\u6b63\u5728\u652f\u4ed8...";
+                                          };
+                                          throw new Error("Failed pattern match at Yzmall.Page.PayOrderPage line 197, column 27 - line 200, column 15: " + [ state.payBtnState.constructor.name ]);
+                                      })()) ]) ]) ]), Yzmall_Utils.renderFooter, Yzmall_Page_Part_MobileMenu.forMobileMenu, Yzmall_Page_Part_MobileMenu.mobileMenu(page) ]);
+                                  };
+                                  var initialState = function (v) {
+                                      return {
+                                          order: Network_RemoteData.NotAsked.value,
+                                          isRegular: v.isRegular,
+                                          currentAccount: Data_Maybe.Nothing.value,
+                                          bankCard: Network_RemoteData.NotAsked.value,
+                                          showVcode: Data_Maybe.Nothing.value,
+                                          commodityId: v.commodityId,
+                                          priceDesc: v.priceDesc,
+                                          commodityName: v.commodityName,
+                                          orderId: v.orderId,
+                                          cardId: v.cardId,
+                                          payBtnState: OJBK.value
+                                      };
+                                  };
+                                  var $$eval = function (v) {
+                                      if (v instanceof Initialize) {
+                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new GetBankCard(v.value0)))))(function () {
+                                              return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                          });
+                                      };
+                                      if (v instanceof GetBankCard) {
+                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify(Halogen_Query_HalogenM.monadStateHalogenM)(function (v1) {
+                                              var $40 = {};
+                                              for (var $41 in v1) {
+                                                  if ({}.hasOwnProperty.call(v1, $41)) {
+                                                      $40[$41] = v1[$41];
+                                                  };
+                                              };
+                                              $40.bankCard = Network_RemoteData.Loading.value;
+                                              return $40;
+                                          }))(function (v1) {
+                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.get(Halogen_Query_HalogenM.monadStateHalogenM))(function (v2) {
+                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_BankCard.getBankCard(Yzmall_Api_Capablity_Resource_BankCard.manageBankCardHalogenM(dictManageBankCard))(Yzmall_Utils.unsafeSlug(Data_Show.show(Data_Show.showInt)(v2.cardId))))(function (v3) {
+                                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v4) {
+                                                          var $45 = {};
+                                                          for (var $46 in v4) {
+                                                              if ({}.hasOwnProperty.call(v4, $46)) {
+                                                                  $45[$46] = v4[$46];
+                                                              };
+                                                          };
+                                                          $45.bankCard = Network_RemoteData.fromMaybe(v3);
+                                                          return $45;
+                                                      }))(function () {
+                                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                                      });
+                                                  });
+                                              });
+                                          });
+                                      };
+                                      if (v instanceof GetOrder) {
+                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.get(Halogen_Query_HalogenM.monadStateHalogenM))(function (v1) {
+                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("pay_input")))(function (v2) {
+                                                  var payFunc = (function () {
+                                                      if (v1.isRegular) {
+                                                          return Yzmall_Api_Capablity_Resource_CommodityOrder.payForOrder(Yzmall_Api_Capablity_Resource_CommodityOrder.manageOrderHalogenM(dictManageOrder));
+                                                      };
+                                                      return Yzmall_Api_Capablity_Resource_CommodityOrder.payForOrderSpecial(Yzmall_Api_Capablity_Resource_CommodityOrder.manageOrderHalogenM(dictManageOrder));
+                                                  })();
+                                                  var params = (function () {
+                                                      var $52 = Data_Maybe.isJust(v1.showVcode);
+                                                      if ($52) {
+                                                          return new Data_Maybe.Just(v2);
+                                                      };
+                                                      return Data_Maybe.Nothing.value;
+                                                  })();
+                                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v3) {
+                                                      var $53 = {};
+                                                      for (var $54 in v3) {
+                                                          if ({}.hasOwnProperty.call(v3, $54)) {
+                                                              $53[$54] = v3[$54];
+                                                          };
+                                                      };
+                                                      $53.payBtnState = Uploading.value;
+                                                      return $53;
+                                                  }))(function () {
+                                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(payFunc(Yzmall_Utils.unsafeSlug(Data_Show.show(Data_Show.showInt)(v1.orderId)))(params))(function (v3) {
+                                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v4) {
+                                                              var $57 = {};
+                                                              for (var $58 in v4) {
+                                                                  if ({}.hasOwnProperty.call(v4, $58)) {
+                                                                      $57[$58] = v4[$58];
+                                                                  };
+                                                              };
+                                                              $57.payBtnState = OJBK.value;
+                                                              return $57;
+                                                          }))(function () {
+                                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)((function () {
+                                                                  if (v3 instanceof Data_Maybe.Just) {
+                                                                      if (v3.value0.expectVcode) {
+                                                                          return Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v4) {
+                                                                              var $62 = {};
+                                                                              for (var $63 in v4) {
+                                                                                  if ({}.hasOwnProperty.call(v4, $63)) {
+                                                                                      $62[$63] = v4[$63];
+                                                                                  };
+                                                                              };
+                                                                              $62.showVcode = new Data_Maybe.Just(Data_Unit.unit);
+                                                                              return $62;
+                                                                          });
+                                                                      };
+                                                                      if (!v3.value0.expectVcode) {
+                                                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.alertMsg("\u5546\u54c1\u62a2\u8d2d\u6210\u529f")))(function () {
+                                                                              return Yzmall_Capability_Navigate.navigate(Yzmall_Capability_Navigate.navigateHalogenM(dictNavigate))(new Yzmall_Data_Route.PC_ROUTER(new Data_Maybe.Just(Yzmall_Data_Route2.MyOrders.value)));
+                                                                          });
+                                                                      };
+                                                                      throw new Error("Failed pattern match at Yzmall.Page.PayOrderPage line 140, column 11 - line 145, column 58: " + [ v3.value0.expectVcode.constructor.name ]);
+                                                                  };
+                                                                  if (v3 instanceof Data_Maybe.Nothing) {
+                                                                      return Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.alertMsg("\u652f\u4ed8\u8bf7\u6c42\u5931\u8d25"));
+                                                                  };
+                                                                  throw new Error("Failed pattern match at Yzmall.Page.PayOrderPage line 138, column 7 - line 149, column 7: " + [ v3.constructor.name ]);
+                                                              })())(function () {
+                                                                  return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                                              });
+                                                          });
+                                                      });
+                                                  });
+                                              });
+                                          });
+                                      };
+                                      if (v instanceof GetVcode) {
+                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.get(Halogen_Query_HalogenM.monadStateHalogenM))(function (v1) {
+                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)((function () {
+                                                  if (v1.bankCard instanceof Network_RemoteData.Success) {
+                                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Account.createVcode(Yzmall_Api_Capablity_Resource_Account.manageAccountHalogenM(dictManageAccount))(v1.bankCard.value0.phone))(function (v2) {
+                                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                                      });
+                                                  };
+                                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.alertMsg("\u94f6\u884c\u5361\u4fe1\u606f\u83b7\u53d6\u5931\u8d25")))(function () {
+                                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                                  });
+                                              })())(function () {
+                                                  return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                              });
+                                          });
+                                      };
+                                      throw new Error("Failed pattern match at Yzmall.Page.PayOrderPage line 118, column 10 - line 160, column 13: " + [ v.constructor.name ]);
+                                  };
+                                  return Halogen_Component.lifecycleParentComponent(Data_Ord.ordUnit)({
+                                      initialState: initialState,
+                                      render: render,
+                                      "eval": $$eval,
+                                      receiver: Data_Function["const"](Data_Maybe.Nothing.value),
+                                      initializer: Data_Maybe.Just.create(Halogen_Query.action(Initialize.create)),
+                                      finalizer: Data_Maybe.Nothing.value
+                                  });
+                              };
+                          };
+                      };
+                  };
+              };
+          };
       };
-      var $$eval = function (v) {
-          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
-      };
-      return Halogen_Component.component(Halogen_HTML_Core.bifunctorHTML)({
-          initialState: Data_Function["const"](account),
-          render: render,
-          "eval": $$eval,
-          receiver: Data_Function["const"](Data_Maybe.Nothing.value)
-      });
   };
+  exports["Uploading"] = Uploading;
+  exports["OJBK"] = OJBK;
+  exports["Initialize"] = Initialize;
+  exports["GetBankCard"] = GetBankCard;
+  exports["GetOrder"] = GetOrder;
+  exports["GetVcode"] = GetVcode;
   exports["component"] = component;
-  exports["renderListGroup"] = renderListGroup;
-  exports["renderItem"] = renderItem;
-})(PS["Yzmall.Page.PersonalCenter"] = PS["Yzmall.Page.PersonalCenter"] || {});
+  exports["eqPayBtnState"] = eqPayBtnState;
+})(PS["Yzmall.Page.PayOrderPage"] = PS["Yzmall.Page.PayOrderPage"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
   "use strict";
+  var Conduit_Component_Utils = PS["Conduit.Component.Utils"];
   var Control_Applicative = PS["Control.Applicative"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Monad_Reader = PS["Control.Monad.Reader"];
+  var Control_Monad_Reader_Class = PS["Control.Monad.Reader.Class"];
+  var Control_Monad_State_Class = PS["Control.Monad.State.Class"];
+  var Data_Array = PS["Data.Array"];
+  var Data_Eq = PS["Data.Eq"];
+  var Data_Function = PS["Data.Function"];
+  var Data_Functor = PS["Data.Functor"];
+  var Data_HeytingAlgebra = PS["Data.HeytingAlgebra"];
+  var Data_Lens = PS["Data.Lens"];
+  var Data_Lens_Fold = PS["Data.Lens.Fold"];
+  var Data_Lens_Internal_Forget = PS["Data.Lens.Internal.Forget"];
+  var Data_Maybe = PS["Data.Maybe"];
+  var Data_Maybe_First = PS["Data.Maybe.First"];
+  var Data_Ord = PS["Data.Ord"];
+  var Data_Ring = PS["Data.Ring"];
+  var Data_Semigroup = PS["Data.Semigroup"];
+  var Data_Show = PS["Data.Show"];
+  var Data_Tuple = PS["Data.Tuple"];
+  var Data_Unit = PS["Data.Unit"];
+  var Data_Void = PS["Data.Void"];
+  var Effect_Aff_Class = PS["Effect.Aff.Class"];
+  var Effect_Class = PS["Effect.Class"];
+  var Effect_Ref = PS["Effect.Ref"];
+  var Halogen = PS["Halogen"];
+  var Halogen_Component = PS["Halogen.Component"];
+  var Halogen_HTML = PS["Halogen.HTML"];
+  var Halogen_HTML_Core = PS["Halogen.HTML.Core"];
+  var Halogen_HTML_Elements = PS["Halogen.HTML.Elements"];
+  var Halogen_HTML_Events = PS["Halogen.HTML.Events"];
+  var Halogen_HTML_Properties = PS["Halogen.HTML.Properties"];
+  var Halogen_Query = PS["Halogen.Query"];
+  var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
+  var Halogen_Themes_Bootstrap4 = PS["Halogen.Themes.Bootstrap4"];
+  var Network_RemoteData = PS["Network.RemoteData"];
+  var Prelude = PS["Prelude"];
+  var Slug = PS["Slug"];
+  var $$String = PS["String"];
+  var Yzmalal_Data_CommodityOrder = PS["Yzmalal.Data.CommodityOrder"];
+  var Yzmall_Api_Capablity_Resource_Account = PS["Yzmall.Api.Capablity.Resource.Account"];
+  var Yzmall_Api_Capablity_Resource_Address = PS["Yzmall.Api.Capablity.Resource.Address"];
+  var Yzmall_Api_Capablity_Resource_BankCard = PS["Yzmall.Api.Capablity.Resource.BankCard"];
+  var Yzmall_Api_Capablity_Resource_CommodityOrder = PS["Yzmall.Api.Capablity.Resource.CommodityOrder"];
+  var Yzmall_Capability_Navigate = PS["Yzmall.Capability.Navigate"];
+  var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
+  var Yzmall_Data_Address = PS["Yzmall.Data.Address"];
+  var Yzmall_Data_BankCard = PS["Yzmall.Data.BankCard"];
+  var Yzmall_Data_Commodity = PS["Yzmall.Data.Commodity"];
+  var Yzmall_Data_Route = PS["Yzmall.Data.Route"];
+  var Yzmall_Data_Route2 = PS["Yzmall.Data.Route2"];
+  var Yzmall_Page_BankCardEditor = PS["Yzmall.Page.BankCardEditor"];
+  var Yzmall_Page_Part_Login = PS["Yzmall.Page.Part.Login"];
+  var Yzmall_Page_Part_MobileMenu = PS["Yzmall.Page.Part.MobileMenu"];
+  var Yzmall_Page_Part_Navbar = PS["Yzmall.Page.Part.Navbar"];
+  var Yzmall_Page_Utils = PS["Yzmall.Page.Utils"];
+  var Yzmall_Resource_Commodity = PS["Yzmall.Resource.Commodity"];
+  var Yzmall_Utils = PS["Yzmall.Utils"];                 
+  var Initialize = (function () {
+      function Initialize(value0) {
+          this.value0 = value0;
+      };
+      Initialize.create = function (value0) {
+          return new Initialize(value0);
+      };
+      return Initialize;
+  })();
+  var GetCommodity = (function () {
+      function GetCommodity(value0) {
+          this.value0 = value0;
+      };
+      GetCommodity.create = function (value0) {
+          return new GetCommodity(value0);
+      };
+      return GetCommodity;
+  })();
+  var GetAddress = (function () {
+      function GetAddress(value0) {
+          this.value0 = value0;
+      };
+      GetAddress.create = function (value0) {
+          return new GetAddress(value0);
+      };
+      return GetAddress;
+  })();
+  var GetBankCard = (function () {
+      function GetBankCard(value0) {
+          this.value0 = value0;
+      };
+      GetBankCard.create = function (value0) {
+          return new GetBankCard(value0);
+      };
+      return GetBankCard;
+  })();
+  var ConfirmPurchase = (function () {
+      function ConfirmPurchase(value0, value1) {
+          this.value0 = value0;
+          this.value1 = value1;
+      };
+      ConfirmPurchase.create = function (value0) {
+          return function (value1) {
+              return new ConfirmPurchase(value0, value1);
+          };
+      };
+      return ConfirmPurchase;
+  })();
+  var CreateOrder = (function () {
+      function CreateOrder(value0) {
+          this.value0 = value0;
+      };
+      CreateOrder.create = function (value0) {
+          return new CreateOrder(value0);
+      };
+      return CreateOrder;
+  })();
+  var params = function (addrId) {
+      return {
+          tag: 0,
+          addressId: addrId,
+          amount: 1
+      };
+  };
+  var getPriceDesc = function (v) {
+      if (v instanceof Data_Maybe.Nothing) {
+          return "";
+      };
+      if (v instanceof Data_Maybe.Just) {
+          if (v.value0.category instanceof Yzmall_Data_Commodity.Regular) {
+              return Data_Show.show(Data_Show.showNumber)(v.value0.price) + "\u5143";
+          };
+          if (v.value0.category instanceof Yzmall_Data_Commodity.Special) {
+              return Data_Show.show(Data_Show.showNumber)(v.value0.price) + ("\u5143 " + (Data_Show.show(Data_Show.showNumber)(v.value0.gold) + "\u91d1\u5e01"));
+          };
+          throw new Error("Failed pattern match at Yzmall.Page.PurchaseConfirm line 400, column 3 - line 404, column 1: " + [ v.value0.category.constructor.name ]);
+      };
+      throw new Error("Failed pattern match at Yzmall.Page.PurchaseConfirm line 397, column 1 - line 397, column 42: " + [ v.constructor.name ]);
+  };
+  var getCName = function (v) {
+      if (v instanceof Data_Maybe.Nothing) {
+          return "";
+      };
+      if (v instanceof Data_Maybe.Just) {
+          return v.value0.name;
+      };
+      throw new Error("Failed pattern match at Yzmall.Page.PurchaseConfirm line 404, column 1 - line 404, column 38: " + [ v.constructor.name ]);
+  };
+  var getCId = function (v) {
+      if (v instanceof Data_Maybe.Nothing) {
+          return -1 | 0;
+      };
+      if (v instanceof Data_Maybe.Just) {
+          return v.value0.id;
+      };
+      throw new Error("Failed pattern match at Yzmall.Page.PurchaseConfirm line 408, column 1 - line 408, column 33: " + [ v.constructor.name ]);
+  };
+  var getBankCardId = function (v) {
+      if (v instanceof Data_Maybe.Nothing) {
+          return -1 | 0;
+      };
+      if (v instanceof Data_Maybe.Just) {
+          return v.value0.id;
+      };
+      throw new Error("Failed pattern match at Yzmall.Page.PurchaseConfirm line 412, column 1 - line 412, column 39: " + [ v.constructor.name ]);
+  };
+  var combineMaybe = function (v) {
+      return function (v1) {
+          if (v instanceof Data_Maybe.Just) {
+              return new Data_Maybe.Just(v.value0);
+          };
+          if (v instanceof Data_Maybe.Nothing) {
+              return v1;
+          };
+          throw new Error("Failed pattern match at Yzmall.Page.PurchaseConfirm line 416, column 1 - line 416, column 56: " + [ v.constructor.name, v1.constructor.name ]);
+      };
+  };
+  var component = function (dictMonadAff) {
+      return function (dictManageCommodity) {
+          return function (dictManageAccount) {
+              return function (dictManageOrder) {
+                  return function (dictManageAddress) {
+                      return function (dictManageBankCard) {
+                          return function (dictMonadAsk) {
+                              return function (dictNavigate) {
+                                  var render = function (state) {
+                                      var renderSpecial = function (v) {
+                                          return function (v1) {
+                                              if (v) {
+                                                  var menuItemInfo = {
+                                                      name: "\u53ef\u7528\u91d1\u5e01",
+                                                      rightDesc: Data_Maybe.Just.create(Data_Show.show(Data_Show.showNumber)(v1.gold)),
+                                                      leftIcon: Data_Maybe.Nothing.value,
+                                                      withRightIcon: false
+                                                  };
+                                                  return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mt3) ])([ Halogen_HTML_Elements.div_([ Yzmall_Page_Utils.renderBar(menuItemInfo)(Data_Maybe.Nothing.value) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mt3) ])([ Yzmall_Page_Utils.renderBar({
+                                                      name: "",
+                                                      rightDesc: new Data_Maybe.Just("\u5e73\u53f0\u4ee3\u552e"),
+                                                      leftIcon: Data_Maybe.Nothing.value,
+                                                      withRightIcon: false
+                                                  })(Data_Maybe.Nothing.value) ]) ]);
+                                              };
+                                              if (!v) {
+                                                  return Halogen_HTML_Core.text("");
+                                              };
+                                              throw new Error("Failed pattern match at Yzmall.Page.PurchaseConfirm line 133, column 7 - line 148, column 12: " + [ v.constructor.name, v1.constructor.name ]);
+                                          };
+                                      };
+                                      var renderNavbar$prime = function (commodity) {
+                                          return Halogen_HTML.slot(Data_Unit.unit)(Yzmall_Page_Part_Navbar.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageAccount))({
+                                              page: (function () {
+                                                  var $71 = Data_Eq.eq(Yzmall_Data_Commodity.eqCommodityCategory)(Yzmall_Data_Commodity.Special.value)(commodity.category);
+                                                  if ($71) {
+                                                      return Yzmall_Page_Part_Navbar.Second.value;
+                                                  };
+                                                  return Yzmall_Page_Part_Navbar.First.value;
+                                              })()
+                                          })(Data_Void.absurd);
+                                      };
+                                      var renderBankCard = function (v) {
+                                          if (v instanceof Data_Maybe.Just) {
+                                              return Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.py2)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px2)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.alignItemsCenter))))))), Yzmall_Utils.style(Yzmall_Page_Utils.greyBg + "text-decoration:none;"), Conduit_Component_Utils.safeHref(Yzmall_Data_Route.PC_ROUTER.create(new Data_Maybe.Just(Yzmall_Data_Route2.BankCardSelector.value))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.flexColumn)) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.textWhite) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr1) ])([ Halogen_HTML_Core.text(v.value0.name) ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text(Yzmall_Utils.encodePhone(v.value0.phone)) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.alignItemsCenter))) ])([ Halogen_HTML_Core.text(v.value0.cardId) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textDanger)(Halogen_Themes_Bootstrap4.mlAuto)) ])([ Halogen_HTML_Core.text("\u6362\u5361\u652f\u4ed8") ]) ]);
+                                          };
+                                          var menuItemInfo = {
+                                              name: "\u8bf7\u6dfb\u52a0\u94f6\u884c\u5361",
+                                              rightDesc: Data_Maybe.Nothing.value,
+                                              leftIcon: Data_Maybe.Nothing.value,
+                                              withRightIcon: true
+                                          };
+                                          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mb3) ])([ Yzmall_Page_Utils.renderBar(menuItemInfo)(Data_Maybe.Just.create(Yzmall_Data_Route.PC_ROUTER.create(new Data_Maybe.Just(Yzmall_Data_Route2.BankCardEditor.value)))) ]);
+                                      };
+                                      var renderAddress = function (v) {
+                                          if (v instanceof Data_Maybe.Just) {
+                                              return Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.py2)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px2)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.alignItemsCenter))))))), Yzmall_Utils.style(Yzmall_Page_Utils.greyBg + "text-decoration:none;"), Conduit_Component_Utils.safeHref(Yzmall_Data_Route.PC_ROUTER.create(new Data_Maybe.Just(Yzmall_Data_Route2.AddressSelector.value))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.flexColumn)) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.textWhite) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr1) ])([ Halogen_HTML_Core.text(v.value0.name) ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text(Yzmall_Utils.encodePhone(v.value0.phone)) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.alignItemsCenter))) ])([ Halogen_HTML_Elements.i([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mr1)("fas fa-map-marker-alt")) ])([  ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text(v.value0.address) ]) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textDanger)(Halogen_Themes_Bootstrap4.mlAuto)) ])([ Halogen_HTML_Core.text("\u66f4\u6362\u5730\u5740") ]) ]);
+                                          };
+                                          var menuItemInfo = {
+                                              name: "\u8bf7\u6dfb\u52a0\u5730\u5740",
+                                              rightDesc: Data_Maybe.Nothing.value,
+                                              leftIcon: Data_Maybe.Nothing.value,
+                                              withRightIcon: true
+                                          };
+                                          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mb3) ])([ Yzmall_Page_Utils.renderBar(menuItemInfo)(Data_Maybe.Just.create(Yzmall_Data_Route.PC_ROUTER.create(new Data_Maybe.Just(Yzmall_Data_Route2.AddressEditor.value)))) ]);
+                                      };
+                                      var mbCommodity = Data_Lens_Fold.preview(Network_RemoteData._Success(Data_Lens_Internal_Forget.choiceForget(Data_Maybe_First.monoidFirst)))(state.commodity);
+                                      var mbBankCard = Data_Lens_Fold.preview(Network_RemoteData._Success(Data_Lens_Internal_Forget.choiceForget(Data_Maybe_First.monoidFirst)))(state.bankCard);
+                                      var mbAddress = Data_Lens_Fold.preview(Network_RemoteData._Success(Data_Lens_Internal_Forget.choiceForget(Data_Maybe_First.monoidFirst)))(state.address);
+                                      var confirmPc = function (commodity) {
+                                          return Halogen_HTML_Elements.div([ Yzmall_Utils.style(Yzmall_Page_Utils.greyBg + "height: 50px"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.row)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRowReverse)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Yzmall_Page_Utils.pcOnly)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mt3)(Halogen_Themes_Bootstrap4.mx0))))))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col4)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd2)(Halogen_Themes_Bootstrap4.px0))) ])([ Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.rounded0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.h100)(Halogen_Themes_Bootstrap4.dFlex))))))), Halogen_HTML_Events.onClick(Halogen_HTML_Events.input_(CreateOrder.create)) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.myAuto)(Halogen_Themes_Bootstrap4.mxAuto)) ])([ Halogen_HTML_Core.text("\u786e\u8ba4\u652f\u4ed8") ]) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col8)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd4)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.pl2)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRow)(Halogen_Themes_Bootstrap4.myAuto)))))), Yzmall_Utils.style(Yzmall_Page_Utils.yellowColor) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mr2)(Halogen_Themes_Bootstrap4.mlAuto)) ])([ Halogen_HTML_Core.text("\u5b9e\u4ed8\u6b3e: " + (Data_Show.show(Data_Show.showNumber)(commodity.price) + "\u5143")) ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text((function () {
+                                              var $76 = Data_Eq.eq(Yzmall_Data_Commodity.eqCommodityCategory)(commodity.category)(Yzmall_Data_Commodity.Regular.value);
+                                              if ($76) {
+                                                  return "\u8d60";
+                                              };
+                                              return "";
+                                          })() + ("\u6d88\u8017\u91d1\u5e01: " + Data_Show.show(Data_Show.showNumber)(commodity.gold))) ]) ]) ]);
+                                      };
+                                      var confirmMobile = function (commodity) {
+                                          return Halogen_HTML_Elements.div([ Yzmall_Utils.style(Yzmall_Page_Utils.greyBg), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.row)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRowReverse)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Yzmall_Page_Utils.mobileOnly)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mt3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mx0)("payment-bar")))))))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col4)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd2)(Halogen_Themes_Bootstrap4.px0))) ])([ Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.rounded0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.h100)(Halogen_Themes_Bootstrap4.dFlex))))))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.myAuto)(Halogen_Themes_Bootstrap4.mxAuto)), Halogen_HTML_Events.onClick(Halogen_HTML_Events.input_(CreateOrder.create)) ])([ Halogen_HTML_Core.text("\u786e\u8ba4\u652f\u4ed8") ]) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col8)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd4)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.pl2)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRow)(Halogen_Themes_Bootstrap4.myAuto)))))), Yzmall_Utils.style(Yzmall_Page_Utils.yellowColor) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr2) ])([ Halogen_HTML_Core.text("\u5b9e\u4ed8\u6b3e: " + (Data_Show.show(Data_Show.showNumber)(commodity.price) + "\u5143")) ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text("\u91d1\u5e01: " + Data_Show.show(Data_Show.showNumber)(commodity.gold)) ]) ]) ]);
+                                      };
+                                      var commodityInfo = function (commodity) {
+                                          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.py2)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mx0)(Halogen_Themes_Bootstrap4.px3))))), Yzmall_Utils.style(Yzmall_Page_Utils.greyBg + "height: 86px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.style("background-image: url(" + (commodity.thumbnail + ("); background-position: center left; background-size: cover; background-repeat: no-repeat; " + "width: 120px; height: 70px"))) ])([  ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.justifyContentBetween)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.pl2)))))), Yzmall_Utils.style("height: 70px") ])([ Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text(commodity.name) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexRow)(Halogen_Themes_Bootstrap4.mtAuto))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.style(Yzmall_Page_Utils.yellowColor), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr2) ])([ Halogen_HTML_Core.text("\uffe5" + (Data_Show.show(Data_Show.showNumber)(commodity.price) + "\u5143")) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.style(Yzmall_Page_Utils.yellowColor) ])([ Halogen_HTML_Core.text("\u91d1\u5e01: " + Data_Show.show(Data_Show.showNumber)(commodity.gold)) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.style(Yzmall_Page_Utils.greyColor), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto) ])([ Halogen_HTML_Core.text("\u6570\u91cf: 1") ]) ]) ]) ]);
+                                      };
+                                      return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Conduit_Component_Utils.maybeElem(mbCommodity)(renderNavbar$prime), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Halogen_Themes_Bootstrap4.mxAuto))), Yzmall_Utils.style("min-height: 633px") ])([ renderAddress(mbAddress), renderBankCard(mbBankCard), Conduit_Component_Utils.maybeElem(mbCommodity)(commodityInfo), Conduit_Component_Utils.maybeElem(state.account)(renderSpecial(state.isSpecial)), Conduit_Component_Utils.maybeElem(mbCommodity)(confirmPc) ]), Conduit_Component_Utils.maybeElem(mbCommodity)(confirmMobile), Yzmall_Utils.renderFooter, Yzmall_Page_Part_MobileMenu.mobileMenu((function () {
+                                          var $77 = Data_Eq.eq(Data_Maybe.eqMaybe(Yzmall_Data_Commodity.eqCommodityCategory))(new Data_Maybe.Just(Yzmall_Data_Commodity.Special.value))(Data_Functor.map(Data_Maybe.functorMaybe)(function (v) {
+                                              return v.category;
+                                          })(mbCommodity));
+                                          if ($77) {
+                                              return Yzmall_Page_Part_Navbar.Second.value;
+                                          };
+                                          return Yzmall_Page_Part_Navbar.First.value;
+                                      })()), Yzmall_Page_Part_MobileMenu.forMobileMenu ]);
+                                  };
+                                  var initialState = function (v) {
+                                      return {
+                                          account: Data_Maybe.Nothing.value,
+                                          address: Network_RemoteData.NotAsked.value,
+                                          bankCard: Network_RemoteData.NotAsked.value,
+                                          commodity: Network_RemoteData.NotAsked.value,
+                                          order: Network_RemoteData.NotAsked.value,
+                                          slug: v.slug,
+                                          isSpecial: v.isSpecial
+                                      };
+                                  };
+                                  var $$eval = function (v) {
+                                      if (v instanceof Initialize) {
+                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new GetCommodity(v.value0)))))(function () {
+                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Conduit_Component_Utils.guardAccount(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk))(Yzmall_Capability_Navigate.navigateHalogenM(dictNavigate)))(function (v1) {
+                                                  if (v1 instanceof Data_Maybe.Nothing) {
+                                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                                  };
+                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Account.getAccountInfo(Yzmall_Api_Capablity_Resource_Account.manageAccountHalogenM(dictManageAccount)))(function (v2) {
+                                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v3) {
+                                                          var $84 = {};
+                                                          for (var $85 in v3) {
+                                                              if ({}.hasOwnProperty.call(v3, $85)) {
+                                                                  $84[$85] = v3[$85];
+                                                              };
+                                                          };
+                                                          $84.account = v2;
+                                                          return $84;
+                                                      }))(function () {
+                                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new GetAddress(v.value0)))))(function () {
+                                                              return Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new GetBankCard(v.value0))));
+                                                          });
+                                                      });
+                                                  });
+                                              }))(function () {
+                                                  return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                              });
+                                          });
+                                      };
+                                      if (v instanceof GetCommodity) {
+                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify(Halogen_Query_HalogenM.monadStateHalogenM)(function (v1) {
+                                              var $88 = {};
+                                              for (var $89 in v1) {
+                                                  if ({}.hasOwnProperty.call(v1, $89)) {
+                                                      $88[$89] = v1[$89];
+                                                  };
+                                              };
+                                              $88.commodity = Network_RemoteData.Loading.value;
+                                              return $88;
+                                          }))(function (v1) {
+                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Resource_Commodity.getCommodity(Yzmall_Resource_Commodity.manageCommodityHalogenM(dictManageCommodity))(v1.slug))(function (v2) {
+                                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v3) {
+                                                      var $93 = {};
+                                                      for (var $94 in v3) {
+                                                          if ({}.hasOwnProperty.call(v3, $94)) {
+                                                              $93[$94] = v3[$94];
+                                                          };
+                                                      };
+                                                      $93.commodity = Network_RemoteData.fromMaybe(v2);
+                                                      return $93;
+                                                  }))(function () {
+                                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                                  });
+                                              });
+                                          });
+                                      };
+                                      if (v instanceof GetAddress) {
+                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.get(Halogen_Query_HalogenM.monadStateHalogenM))(function (v1) {
+                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_Reader_Class.ask(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk)))(function (v2) {
+                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Effect_Ref.read(v2.currentAddressId)))(function (v3) {
+                                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)((function () {
+                                                          var v4 = combineMaybe(v3)(Control_Bind.bindFlipped(Data_Maybe.bindMaybe)(function (v5) {
+                                                              return v5.defaultAddress;
+                                                          })(v1.account));
+                                                          if (v4 instanceof Data_Maybe.Nothing) {
+                                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify(Halogen_Query_HalogenM.monadStateHalogenM)(function (v5) {
+                                                                  var $101 = {};
+                                                                  for (var $102 in v5) {
+                                                                      if ({}.hasOwnProperty.call(v5, $102)) {
+                                                                          $101[$102] = v5[$102];
+                                                                      };
+                                                                  };
+                                                                  $101.address = Network_RemoteData.Loading.value;
+                                                                  return $101;
+                                                              }))(function (v5) {
+                                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Address.myAddresses(Yzmall_Api_Capablity_Resource_Address.manageAddressHalogenM(dictManageAddress)))(function (v6) {
+                                                                      return Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v7) {
+                                                                          var $105 = {};
+                                                                          for (var $106 in v7) {
+                                                                              if ({}.hasOwnProperty.call(v7, $106)) {
+                                                                                  $105[$106] = v7[$106];
+                                                                              };
+                                                                          };
+                                                                          $105.address = Network_RemoteData.fromMaybe(Control_Bind.bindFlipped(Data_Maybe.bindMaybe)(Data_Array.head)(v6));
+                                                                          return $105;
+                                                                      });
+                                                                  });
+                                                              });
+                                                          };
+                                                          if (v4 instanceof Data_Maybe.Just) {
+                                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify(Halogen_Query_HalogenM.monadStateHalogenM)(function (v5) {
+                                                                  var $108 = {};
+                                                                  for (var $109 in v5) {
+                                                                      if ({}.hasOwnProperty.call(v5, $109)) {
+                                                                          $108[$109] = v5[$109];
+                                                                      };
+                                                                  };
+                                                                  $108.address = Network_RemoteData.Loading.value;
+                                                                  return $108;
+                                                              }))(function (v5) {
+                                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Address.getAddress(Yzmall_Api_Capablity_Resource_Address.manageAddressHalogenM(dictManageAddress))(Yzmall_Utils.unsafeSlug(Data_Show.show(Data_Show.showInt)(v4.value0))))(function (v6) {
+                                                                      return Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v7) {
+                                                                          var $112 = {};
+                                                                          for (var $113 in v7) {
+                                                                              if ({}.hasOwnProperty.call(v7, $113)) {
+                                                                                  $112[$113] = v7[$113];
+                                                                              };
+                                                                          };
+                                                                          $112.address = Network_RemoteData.fromMaybe(v6);
+                                                                          return $112;
+                                                                      });
+                                                                  });
+                                                              });
+                                                          };
+                                                          throw new Error("Failed pattern match at Yzmall.Page.PurchaseConfirm line 345, column 7 - line 353, column 54: " + [ v4.constructor.name ]);
+                                                      })())(function () {
+                                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                                      });
+                                                  });
+                                              });
+                                          });
+                                      };
+                                      if (v instanceof GetBankCard) {
+                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.get(Halogen_Query_HalogenM.monadStateHalogenM))(function (v1) {
+                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_Reader_Class.ask(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk)))(function (v2) {
+                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Effect_Ref.read(v2.currentBankCardId)))(function (v3) {
+                                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)((function () {
+                                                          var v4 = combineMaybe(v3)(Control_Bind.bindFlipped(Data_Maybe.bindMaybe)(function (v5) {
+                                                              return v5.defaultBankCard;
+                                                          })(v1.account));
+                                                          if (v4 instanceof Data_Maybe.Nothing) {
+                                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify(Halogen_Query_HalogenM.monadStateHalogenM)(function (v5) {
+                                                                  var $122 = {};
+                                                                  for (var $123 in v5) {
+                                                                      if ({}.hasOwnProperty.call(v5, $123)) {
+                                                                          $122[$123] = v5[$123];
+                                                                      };
+                                                                  };
+                                                                  $122.bankCard = Network_RemoteData.Loading.value;
+                                                                  return $122;
+                                                              }))(function (v5) {
+                                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_BankCard.myBankCards(Yzmall_Api_Capablity_Resource_BankCard.manageBankCardHalogenM(dictManageBankCard)))(function (v6) {
+                                                                      return Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v7) {
+                                                                          var $126 = {};
+                                                                          for (var $127 in v7) {
+                                                                              if ({}.hasOwnProperty.call(v7, $127)) {
+                                                                                  $126[$127] = v7[$127];
+                                                                              };
+                                                                          };
+                                                                          $126.bankCard = Network_RemoteData.fromMaybe(Control_Bind.bindFlipped(Data_Maybe.bindMaybe)(Data_Array.head)(v6));
+                                                                          return $126;
+                                                                      });
+                                                                  });
+                                                              });
+                                                          };
+                                                          if (v4 instanceof Data_Maybe.Just) {
+                                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify(Halogen_Query_HalogenM.monadStateHalogenM)(function (v5) {
+                                                                  var $129 = {};
+                                                                  for (var $130 in v5) {
+                                                                      if ({}.hasOwnProperty.call(v5, $130)) {
+                                                                          $129[$130] = v5[$130];
+                                                                      };
+                                                                  };
+                                                                  $129.bankCard = Network_RemoteData.Loading.value;
+                                                                  return $129;
+                                                              }))(function (v5) {
+                                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_BankCard.getBankCard(Yzmall_Api_Capablity_Resource_BankCard.manageBankCardHalogenM(dictManageBankCard))(Yzmall_Utils.unsafeSlug(Data_Show.show(Data_Show.showInt)(v4.value0))))(function (v6) {
+                                                                      return Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v7) {
+                                                                          var $133 = {};
+                                                                          for (var $134 in v7) {
+                                                                              if ({}.hasOwnProperty.call(v7, $134)) {
+                                                                                  $133[$134] = v7[$134];
+                                                                              };
+                                                                          };
+                                                                          $133.bankCard = Network_RemoteData.fromMaybe(v6);
+                                                                          return $133;
+                                                                      });
+                                                                  });
+                                                              });
+                                                          };
+                                                          throw new Error("Failed pattern match at Yzmall.Page.PurchaseConfirm line 360, column 7 - line 368, column 56: " + [ v4.constructor.name ]);
+                                                      })())(function () {
+                                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                                      });
+                                                  });
+                                              });
+                                          });
+                                      };
+                                      if (v instanceof ConfirmPurchase) {
+                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value1);
+                                      };
+                                      if (v instanceof CreateOrder) {
+                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.get(Halogen_Query_HalogenM.monadStateHalogenM))(function (v1) {
+                                              var mbCommodity = Data_Lens_Fold.preview(Network_RemoteData._Success(Data_Lens_Internal_Forget.choiceForget(Data_Maybe_First.monoidFirst)))(v1.commodity);
+                                              var mbBankCard = Data_Lens_Fold.preview(Network_RemoteData._Success(Data_Lens_Internal_Forget.choiceForget(Data_Maybe_First.monoidFirst)))(v1.bankCard);
+                                              var mbAddressId = Data_Functor.map(Data_Maybe.functorMaybe)(function (v2) {
+                                                  return v2.id;
+                                              })(Data_Lens_Fold.preview(Network_RemoteData._Success(Data_Lens_Internal_Forget.choiceForget(Data_Maybe_First.monoidFirst)))(v1.address));
+                                              var mbParams = params(mbAddressId);
+                                              var createFunc = (function () {
+                                                  if (v1.isSpecial) {
+                                                      return Yzmall_Api_Capablity_Resource_CommodityOrder.createOrderSpecial(Yzmall_Api_Capablity_Resource_CommodityOrder.manageOrderHalogenM(dictManageOrder));
+                                                  };
+                                                  return Yzmall_Api_Capablity_Resource_CommodityOrder.createOrder(Yzmall_Api_Capablity_Resource_CommodityOrder.manageOrderHalogenM(dictManageOrder));
+                                              })();
+                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(createFunc(v1.slug)(mbParams))(function (v2) {
+                                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)((function () {
+                                                      if (v2 instanceof Data_Maybe.Just) {
+                                                          return Yzmall_Capability_Navigate.navigate(Yzmall_Capability_Navigate.navigateHalogenM(dictNavigate))(new Yzmall_Data_Route.PayOrder({
+                                                              isRegular: !v1.isSpecial,
+                                                              commodityId: getCId(mbCommodity),
+                                                              priceDesc: getPriceDesc(mbCommodity),
+                                                              commodityName: getCName(mbCommodity),
+                                                              orderId: v2.value0.id,
+                                                              cardId: getBankCardId(mbBankCard)
+                                                          }));
+                                                      };
+                                                      if (v2 instanceof Data_Maybe.Nothing) {
+                                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                                      };
+                                                      throw new Error("Failed pattern match at Yzmall.Page.PurchaseConfirm line 383, column 7 - line 394, column 20: " + [ v2.constructor.name ]);
+                                                  })())(function () {
+                                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                                  });
+                                              });
+                                          });
+                                      };
+                                      throw new Error("Failed pattern match at Yzmall.Page.PurchaseConfirm line 325, column 10 - line 395, column 13: " + [ v.constructor.name ]);
+                                  };
+                                  return Halogen_Component.lifecycleParentComponent(Data_Ord.ordUnit)({
+                                      initialState: initialState,
+                                      render: render,
+                                      "eval": $$eval,
+                                      receiver: Data_Function["const"](Data_Maybe.Nothing.value),
+                                      initializer: Data_Maybe.Just.create(Halogen_Query.action(Initialize.create)),
+                                      finalizer: Data_Maybe.Nothing.value
+                                  });
+                              };
+                          };
+                      };
+                  };
+              };
+          };
+      };
+  };
+  exports["Initialize"] = Initialize;
+  exports["GetCommodity"] = GetCommodity;
+  exports["GetAddress"] = GetAddress;
+  exports["GetBankCard"] = GetBankCard;
+  exports["ConfirmPurchase"] = ConfirmPurchase;
+  exports["CreateOrder"] = CreateOrder;
+  exports["component"] = component;
+  exports["getPriceDesc"] = getPriceDesc;
+  exports["getCName"] = getCName;
+  exports["getCId"] = getCId;
+  exports["getBankCardId"] = getBankCardId;
+  exports["combineMaybe"] = combineMaybe;
+  exports["params"] = params;
+})(PS["Yzmall.Page.PurchaseConfirm"] = PS["Yzmall.Page.PurchaseConfirm"] || {});
+(function(exports) {
+  // Generated by purs version 0.12.1
+  "use strict";
+  var Conduit_Component_Utils = PS["Conduit.Component.Utils"];
+  var Control_Applicative = PS["Control.Applicative"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Monad_Reader = PS["Control.Monad.Reader"];
+  var Control_Monad_Reader_Class = PS["Control.Monad.Reader.Class"];
+  var Control_Monad_State_Class = PS["Control.Monad.State.Class"];
   var Data_Array = PS["Data.Array"];
   var Data_Function = PS["Data.Function"];
   var Data_Functor = PS["Data.Functor"];
+  var Data_Lens = PS["Data.Lens"];
+  var Data_Lens_Fold = PS["Data.Lens.Fold"];
+  var Data_Lens_Internal_Forget = PS["Data.Lens.Internal.Forget"];
   var Data_Maybe = PS["Data.Maybe"];
+  var Data_Maybe_First = PS["Data.Maybe.First"];
+  var Data_Ord = PS["Data.Ord"];
+  var Data_Ordering = PS["Data.Ordering"];
+  var Data_Ring = PS["Data.Ring"];
   var Data_Semigroup = PS["Data.Semigroup"];
+  var Data_Semiring = PS["Data.Semiring"];
   var Data_Show = PS["Data.Show"];
+  var Data_Unit = PS["Data.Unit"];
+  var Data_Void = PS["Data.Void"];
+  var Effect_Aff_Class = PS["Effect.Aff.Class"];
+  var Effect_Class = PS["Effect.Class"];
+  var Effect_Ref = PS["Effect.Ref"];
   var Formless = PS["Formless"];
   var Halogen = PS["Halogen"];
   var Halogen_Component = PS["Halogen.Component"];
@@ -32979,80 +39335,307 @@ var PS = {};
   var Halogen_HTML_Elements = PS["Halogen.HTML.Elements"];
   var Halogen_HTML_Events = PS["Halogen.HTML.Events"];
   var Halogen_HTML_Properties = PS["Halogen.HTML.Properties"];
+  var Halogen_Query = PS["Halogen.Query"];
   var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
   var Halogen_Themes_Bootstrap4 = PS["Halogen.Themes.Bootstrap4"];
+  var Network_RemoteData = PS["Network.RemoteData"];
   var Prelude = PS["Prelude"];
   var $$String = PS["String"];
+  var Yzmall_Api_Capablity_Resource_Account = PS["Yzmall.Api.Capablity.Resource.Account"];
+  var Yzmall_Api_Capablity_Resource_CommodityOrder = PS["Yzmall.Api.Capablity.Resource.CommodityOrder"];
+  var Yzmall_Capability_Navigate = PS["Yzmall.Capability.Navigate"];
+  var Yzmall_Data_ACTSell = PS["Yzmall.Data.ACTSell"];
+  var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
+  var Yzmall_Data_PreciseDateTime = PS["Yzmall.Data.PreciseDateTime"];
   var Yzmall_Page_Part_Login = PS["Yzmall.Page.Part.Login"];
   var Yzmall_Page_Part_MobileMenu = PS["Yzmall.Page.Part.MobileMenu"];
+  var Yzmall_Page_Part_Navbar = PS["Yzmall.Page.Part.Navbar"];
   var Yzmall_Page_Utils = PS["Yzmall.Page.Utils"];
-  var Yzmall_Utils = PS["Yzmall.Utils"];
-  var record = {
-      id: 123,
-      date: "2019-03-11 17:34:44",
-      price: 2.0,
-      name: "S-80 \u6211\u7231\u4f60\u624b\u956f\u7f51\u7ea2\u7231\u7684\u8bb0\u5fc6\u949b\u94a218K\u73ab\u7470\u91d1\u624b\u94fe",
-      amount: 1,
-      status: "\u5df2\u552e\u51fa"
-  };
-  var component = (function () {
-      var render = function (state) {
-          var renderTabPane = function (id) {
-              return function (n) {
-                  return function (content) {
-                      return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.tabPane)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.fade)(Yzmall_Page_Utils.existWhenZero(n)(Yzmall_Utils.append(Halogen_Themes_Bootstrap4.active)("show"))))), Yzmall_Utils.attr_("id")(id), Yzmall_Utils.attr_("role")("tabpanel") ])(content);
-                  };
-              };
-          };
-          var renderPCRecord = function (record$prime) {
-              return Halogen_HTML_Elements.tr([ Yzmall_Utils.style("border-top-color: #454545!important; border-bottom-color: #454545!important") ])([ Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("row") ])([ Halogen_HTML_Core.text(Data_Show.show(Data_Show.showInt)(record$prime.id)) ]), Halogen_HTML_Elements.td_([ Halogen_HTML_Core.text(record$prime.date) ]), Halogen_HTML_Elements.td([ Yzmall_Utils.style("color: #f8f2d8") ])([ Halogen_HTML_Core.text(record$prime.name) ]), Halogen_HTML_Elements.td([ Yzmall_Utils.style(Yzmall_Page_Utils.yellowColor) ])([ Halogen_HTML_Core.text("\uffe5" + Data_Show.show(Data_Show.showNumber)(record$prime.price)) ]), Halogen_HTML_Elements.td_([ Halogen_HTML_Core.text(record$prime.status) ]) ]);
-          };
-          var renderMobileRecord = function (record$prime) {
-              return Halogen_HTML_Elements.div([ Yzmall_Utils.style("height: 65px; background-color: #454545"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Halogen_Themes_Bootstrap4.mb3))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px2)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb1)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.py1)(Halogen_Themes_Bootstrap4.borderBottom)))))), Yzmall_Utils.style("border-bottom-color: #555555!important; font-size: 15px") ])([ Halogen_HTML_Core.text("\u8ba2\u5355\u7f16\u53f7 " + Data_Show.show(Data_Show.showInt)(record$prime.id)), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.ml2) ])([ Halogen_HTML_Core.text(record$prime.date) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto) ])([ Halogen_HTML_Core.text(record$prime.status) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.px2))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.style("color: #f8f2d8"), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr4) ])([ Halogen_HTML_Core.text("\uffe5" + Data_Show.show(Data_Show.showNumber)(record$prime.price)) ]), Halogen_HTML_Core.text(record$prime.name + (" * " + Data_Show.show(Data_Show.showInt)(record$prime.amount))) ]) ]);
-          };
-          var renderTabContent = function (state$prime) {
-              return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.tabContent), Yzmall_Utils.attr_("id")("nav-tabContent"), Yzmall_Utils.style("min-height: 600px") ])([ renderTabPane("ds_act")(0)([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.py3)(Halogen_Themes_Bootstrap4.mb3)))))), Yzmall_Utils.style("border-bottom: #929292 1px solid;") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.mb3))), Yzmall_Utils.style(Yzmall_Page_Utils.lightYellowColor) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr3) ])([ Halogen_HTML_Core.text("ACT\u5e02\u4ef7") ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text("\uffe5" + Data_Show.show(Data_Show.showNumber)(state$prime.price)) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.style(Yzmall_Page_Utils.lightYellowColor), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.mb3))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr3) ])([ Halogen_HTML_Core.text("\u5269\u4f59\u6c42\u8d2d\u6570\u91cf") ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text(Data_Show.show(Data_Show.showInt)(state$prime.mySaleActAmount)) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.style(Yzmall_Page_Utils.lightYellowColor), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.mb3))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr3) ])([ Halogen_HTML_Core.text("\u6211\u62e5\u6709\u7684\u4ee3\u552eACT") ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text(Data_Show.show(Data_Show.showInt)(state$prime.mySaleActAmount)) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formInline), Yzmall_Utils.style(Yzmall_Page_Utils.lightYellowColor) ])([ Halogen_HTML_Core.text("\u51fa\u552e\u6570\u91cf"), Halogen_HTML_Elements.input([ Yzmall_Utils.attr_("type")("text"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.formControl)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.ml4)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.bgTransparent)(Halogen_Themes_Bootstrap4.p0)))), Yzmall_Utils.style("border-color: #929292; " + (Yzmall_Page_Utils.lightYellowColor + "width: 100px")) ]) ]) ]), Halogen_HTML_Elements.button([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.floatRight)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.rounded0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.px5)))))), Yzmall_Utils.style("font-size: 22px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr4) ])([ Halogen_HTML_Core.text("\u786e") ]), Halogen_HTML_Core.text("\u5b9a") ]) ]), renderTabPane("fl_act")(1)([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.py3)(Halogen_Themes_Bootstrap4.mb3)))))), Yzmall_Utils.style("border-bottom: #929292 1px solid;") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.mb3))), Yzmall_Utils.style(Yzmall_Page_Utils.lightYellowColor) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr3) ])([ Halogen_HTML_Core.text("ACT\u5e02\u4ef7") ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text("\uffe5" + Data_Show.show(Data_Show.showNumber)(state$prime.price)) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.style(Yzmall_Page_Utils.lightYellowColor), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.mb3))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr3) ])([ Halogen_HTML_Core.text("\u5269\u4f59\u6c42\u8d2d\u6570\u91cf") ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text(Data_Show.show(Data_Show.showInt)(state$prime.mySaleActAmount)) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.style(Yzmall_Page_Utils.lightYellowColor), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.mb3))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr3) ])([ Halogen_HTML_Core.text("\u6211\u62e5\u6709\u7684\u8fd4\u5229ACT") ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text(Data_Show.show(Data_Show.showInt)(state$prime.mySaleActAmount)) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.formInline), Yzmall_Utils.style(Yzmall_Page_Utils.lightYellowColor) ])([ Halogen_HTML_Core.text("\u51fa\u552e\u6570\u91cf"), Halogen_HTML_Elements.input([ Yzmall_Utils.attr_("type")("text"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.formControl)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.ml4)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.bgTransparent)(Halogen_Themes_Bootstrap4.p0)))), Yzmall_Utils.style("border-color: #929292; " + (Yzmall_Page_Utils.lightYellowColor + "width: 100px")) ]) ]) ]), Halogen_HTML_Elements.button([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.floatRight)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.rounded0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.px5)))))), Yzmall_Utils.style("font-size: 22px") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr4) ])([ Halogen_HTML_Core.text("\u786e") ]), Halogen_HTML_Core.text("\u5b9a") ]) ]), renderTabPane("act_records")(2)([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Yzmall_Page_Utils.pcOnly)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mt2)(Halogen_Themes_Bootstrap4.px0)))), Yzmall_Utils.style("min-height: 633px") ])([ Halogen_HTML_Elements.table([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.table)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.tableStriped)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.tableDark)(Halogen_Themes_Bootstrap4.bgTransparent)))) ])(Data_Semigroup.append(Data_Semigroup.semigroupArray)([ Halogen_HTML_Elements.tr_([ Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u8ba2\u5355\u7f16\u53f7") ]), Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u521b\u5efa\u65f6\u95f4") ]), Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u5546\u54c1") ]), Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u91d1\u989d") ]), Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u72b6\u6001") ]) ]) ])(Data_Functor.map(Data_Functor.functorArray)(renderPCRecord)(state$prime.records))) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Yzmall_Page_Utils.mobileOnly)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.mt2))))) ])(Data_Functor.map(Data_Functor.functorArray)(renderMobileRecord)(state$prime.records)) ]) ]);
-          };
-          var renderItem = function (n) {
-              return function (id) {
-                  return function (name) {
-                      return Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.navItem)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.navLink)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.bgTransparent)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Yzmall_Page_Utils.existWhenZero(n)(Halogen_Themes_Bootstrap4.active)))))), Yzmall_Utils.attr_("id")("nav-" + (id + "-tab")), Yzmall_Utils.attr_("data-toggle")("tab"), Yzmall_Utils.attr_("href")("#" + id), Yzmall_Utils.attr_("role")("tab") ])([ Halogen_HTML_Core.text(name) ]);
-                  };
-              };
-          };
-          var renderNavTab = Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.nav)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.navTabs)(Halogen_Themes_Bootstrap4.bgTransparent))), Yzmall_Utils.attr_("id")("nav-tab"), Yzmall_Utils.attr_("role")("tablist") ])([ renderItem(0)("ds_act")("\u552e\u51fa \u4ee3\u552eACT"), renderItem(1)("fl_act")("\u552e\u51fa \u8fd4\u5229ACT"), renderItem(2)("act_records")("\u6211\u7684ACT\u51fa\u552e\u5355") ]);
-          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Yzmall_Utils.renderNavBar, Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Halogen_Themes_Bootstrap4.px0)) ])([ Halogen_HTML_Elements.nav_([ renderNavTab, renderTabContent(state) ]) ]), Yzmall_Utils.renderFooter, Yzmall_Page_Part_MobileMenu.forMobileMenu, Yzmall_Page_Part_MobileMenu.mobileMenu, Yzmall_Page_Part_Login.renderLoginModal, Yzmall_Page_Part_Login.renderRegisterModal ]);
+  var Yzmall_Resource_Commodity = PS["Yzmall.Resource.Commodity"];
+  var Yzmall_Utils = PS["Yzmall.Utils"];                 
+  var Initialize = (function () {
+      function Initialize(value0) {
+          this.value0 = value0;
       };
-      var initialState = {
-          price: 1.01,
-          remainRequire: 20000,
-          myReturnActAmount: 100,
-          mySaleActAmount: 200,
-          records: Data_Array.replicate(20)(record)
+      Initialize.create = function (value0) {
+          return new Initialize(value0);
       };
-      var $$eval = function (v) {
-          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
-      };
-      return Halogen_Component.component(Halogen_HTML_Core.bifunctorHTML)({
-          initialState: Data_Function["const"](initialState),
-          render: render,
-          "eval": $$eval,
-          receiver: Data_Function["const"](Data_Maybe.Nothing.value)
-      });
+      return Initialize;
   })();
-  exports["record"] = record;
+  var SellRebateMYT = (function () {
+      function SellRebateMYT(value0) {
+          this.value0 = value0;
+      };
+      SellRebateMYT.create = function (value0) {
+          return new SellRebateMYT(value0);
+      };
+      return SellRebateMYT;
+  })();
+  var SellCommissionMYT = (function () {
+      function SellCommissionMYT(value0) {
+          this.value0 = value0;
+      };
+      SellCommissionMYT.create = function (value0) {
+          return new SellCommissionMYT(value0);
+      };
+      return SellCommissionMYT;
+  })();
+  var GetMytSells = (function () {
+      function GetMytSells(value0) {
+          this.value0 = value0;
+      };
+      GetMytSells.create = function (value0) {
+          return new GetMytSells(value0);
+      };
+      return GetMytSells;
+  })();
+  var GetMytSharedRecord = (function () {
+      function GetMytSharedRecord(value0) {
+          this.value0 = value0;
+      };
+      GetMytSharedRecord.create = function (value0) {
+          return new GetMytSharedRecord(value0);
+      };
+      return GetMytSharedRecord;
+  })();
+  var component = function (dictMonadAff) {
+      return function (dictMonadAsk) {
+          return function (dictNavigate) {
+              return function (dictManageCommodity) {
+                  return function (dictManageOrder) {
+                      return function (dictManageAccount) {
+                          var render = function (state) {
+                              var renderTabPane = function (id) {
+                                  return function (n) {
+                                      return function (content) {
+                                          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.tabPane)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.fade)(Yzmall_Page_Utils.existWhenZero(n)(Yzmall_Utils.append(Halogen_Themes_Bootstrap4.active)("show"))))), Yzmall_Utils.attr_("id")(id), Yzmall_Utils.attr_("role")("tabpanel") ])(content);
+                                      };
+                                  };
+                              };
+                              var renderPCRecord = function (record$prime) {
+                                  return Halogen_HTML_Elements.tr([ Yzmall_Utils.style("border-top-color: #454545!important; border-bottom-color: #454545!important") ])([ Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("row") ])([ Halogen_HTML_Core.text(Data_Show.show(Data_Show.showInt)(record$prime.id)) ]), Halogen_HTML_Elements.td_([ Halogen_HTML_Core.text(Yzmall_Data_PreciseDateTime.toDisplayTime(record$prime.createTime)) ]), Halogen_HTML_Elements.td([ Yzmall_Utils.style("color: #f8f2d8") ])([ Halogen_HTML_Core.text("MYT" + (" * " + Data_Show.show(Data_Show.showInt)(record$prime.amount))) ]), Halogen_HTML_Elements.td([ Yzmall_Utils.style(Yzmall_Page_Utils.yellowColor) ])([ Halogen_HTML_Core.text("\uffe5" + Data_Show.show(Data_Show.showNumber)(record$prime.price)) ]), Halogen_HTML_Elements.td_([ Halogen_HTML_Core.text(Data_Show.show(Yzmall_Data_ACTSell.showACTSellProcess)(record$prime.process)) ]) ]);
+                              };
+                              var renderMobileRecord = function (record$prime) {
+                                  return Halogen_HTML_Elements.div([ Yzmall_Utils.style("height: 65px; background-color: #454545"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Halogen_Themes_Bootstrap4.mb3))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px2)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb1)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.py1)(Halogen_Themes_Bootstrap4.borderBottom)))))), Yzmall_Utils.style("border-bottom-color: #555555!important; font-size: 15px") ])([ Halogen_HTML_Core.text("\u8ba2\u5355\u7f16\u53f7 " + Data_Show.show(Data_Show.showInt)(record$prime.id)), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.ml2) ])([ Halogen_HTML_Core.text(Yzmall_Data_PreciseDateTime.toDisplayTime(record$prime.createTime)) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto) ])([ Halogen_HTML_Core.text(Data_Show.show(Yzmall_Data_ACTSell.showACTSellProcess)(record$prime.process)) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.px2))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.style("color: #f8f2d8"), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr4) ])([ Halogen_HTML_Core.text("\uffe5" + Data_Show.show(Data_Show.showNumber)(record$prime.price)) ]), Halogen_HTML_Core.text("MYT" + (" * " + Data_Show.show(Data_Show.showInt)(record$prime.amount))) ]) ]);
+                              };
+                              var renderItem = function (n) {
+                                  return function (id) {
+                                      return function (name) {
+                                          return Halogen_HTML_Elements.a([ Yzmall_Utils.cls(Yzmall_Utils.append(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.navItem)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.navLink)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.bgTransparent)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Yzmall_Page_Utils.existWhenZero(n)(Halogen_Themes_Bootstrap4.active))(Halogen_Themes_Bootstrap4.px2))))))("px-md-3")), Yzmall_Utils.attr_("id")("nav-" + (id + "-tab")), Yzmall_Utils.attr_("data-toggle")("tab"), Yzmall_Utils.attr_("href")("#" + id), Yzmall_Utils.attr_("role")("tab") ])([ Halogen_HTML_Core.text(name) ]);
+                                      };
+                                  };
+                              };
+                              var renderNavTab = Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.nav)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.navTabs)(Halogen_Themes_Bootstrap4.bgTransparent))), Yzmall_Utils.attr_("id")("nav-tab"), Yzmall_Utils.attr_("role")("tablist") ])([ renderItem(0)("ds_act")("\u552e\u51faMYT"), renderItem(2)("act_records")("\u6211\u7684MYT\u51fa\u552e\u5355") ]);
+                              var myRebateAmount = Data_Maybe.fromMaybe(0.0)(Data_Functor.map(Data_Maybe.functorMaybe)(function (v) {
+                                  return v.rebateBalance;
+                              })(state.currentAccount));
+                              var myCommissionAmount = Data_Maybe.fromMaybe(0.0)(Data_Functor.map(Data_Maybe.functorMaybe)(function (v) {
+                                  return v.commissionBalance;
+                              })(state.currentAccount));
+                              var mbSharedRecord = Data_Lens_Fold.preview(Network_RemoteData._Success(Data_Lens_Internal_Forget.choiceForget(Data_Maybe_First.monoidFirst)))(state.sharedRecord);
+                              var price = Data_Maybe.fromMaybe(0.0)(Data_Functor.map(Data_Maybe.functorMaybe)(function (v) {
+                                  return v.price;
+                              })(mbSharedRecord));
+                              var remainPurchase = Data_Maybe.fromMaybe(0.0)(Data_Functor.map(Data_Maybe.functorMaybe)(function (v) {
+                                  return v.remainPurchase;
+                              })(mbSharedRecord));
+                              var mbMytSells = Data_Functor.map(Data_Maybe.functorMaybe)(Data_Array.sortBy(function (a) {
+                                  return function (b) {
+                                      var $29 = (b.id - a.id | 0) > 0;
+                                      if ($29) {
+                                          return Data_Ordering.GT.value;
+                                      };
+                                      return Data_Ordering.LT.value;
+                                  };
+                              }))(Data_Lens_Fold.preview(Network_RemoteData._Success(Data_Lens_Internal_Forget.choiceForget(Data_Maybe_First.monoidFirst)))(state.mytSells));
+                              var currentPeriod = Data_Maybe.fromMaybe(1)(Data_Functor.map(Data_Maybe.functorMaybe)(function (v) {
+                                  return v.currentPeriod;
+                              })(mbSharedRecord));
+                              var renderTabContent = function (state$prime) {
+                                  return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.tabContent), Yzmall_Utils.attr_("id")("nav-tabContent"), Yzmall_Utils.style("min-height: 600px") ])([ renderTabPane("ds_act")(0)([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.py3)(Halogen_Themes_Bootstrap4.mb3)))))), Yzmall_Utils.style("border-bottom: #929292 1px solid;") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.mb3))), Yzmall_Utils.style(Yzmall_Page_Utils.lightYellowColor) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr3) ])([ Halogen_HTML_Core.text("MYT\u5e02\u4ef7") ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text("\uffe5" + Data_Show.show(Data_Show.showNumber)(price)) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.style(Yzmall_Page_Utils.lightYellowColor), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.mb3))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr3) ])([ Halogen_HTML_Core.text("\u672c\u671f\u62a2\u552e\u671f\u6570") ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text(Data_Show.show(Data_Show.showInt)(currentPeriod)) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.style(Yzmall_Page_Utils.lightYellowColor), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.mb3))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr3) ])([ Halogen_HTML_Core.text("\u6211\u62e5\u6709\u7684MYT") ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text(Data_Show.show(Data_Show.showNumber)(myCommissionAmount + myRebateAmount)) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.style(Yzmall_Page_Utils.lightYellowColor), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.dFlex)) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr3) ])([ Halogen_HTML_Core.text("\u51fa\u552e\u6570\u91cf") ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text("5000") ]) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.dFlex)) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w50)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Halogen_Themes_Bootstrap4.textWhite)))) ])([ Halogen_HTML_Core.text("") ]), Halogen_HTML_Elements.button([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.btnDanger)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mlAuto)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.rounded0)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Halogen_Themes_Bootstrap4.px5)))))), Yzmall_Utils.style("font-size: 22px; height:47px"), Halogen_HTML_Events.onClick(Halogen_HTML_Events.input_(SellCommissionMYT.create)) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr4) ])([ Halogen_HTML_Core.text("\u786e") ]), Halogen_HTML_Core.text("\u5b9a") ]) ]) ]), renderTabPane("act_records")(1)([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Yzmall_Page_Utils.pcOnly)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mt2)(Halogen_Themes_Bootstrap4.px0)))), Yzmall_Utils.style("min-height: 633px") ])([ Halogen_HTML_Elements.table([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.table)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.tableStriped)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.tableDark)(Halogen_Themes_Bootstrap4.bgTransparent)))) ])(Data_Semigroup.append(Data_Semigroup.semigroupArray)([ Halogen_HTML_Elements.tr_([ Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u8ba2\u5355\u7f16\u53f7") ]), Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u521b\u5efa\u65f6\u95f4") ]), Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u5546\u54c1") ]), Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u91d1\u989d") ]), Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u72b6\u6001") ]) ]) ])(Conduit_Component_Utils.maybeElemArray(mbMytSells)(function (mytSells) {
+                                      return Data_Functor.map(Data_Functor.functorArray)(renderPCRecord)(mytSells);
+                                  }))) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Yzmall_Page_Utils.mobileOnly)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.mt2))))) ])(Conduit_Component_Utils.maybeElemArray(mbMytSells)(function (mytSells) {
+                                      return Data_Functor.map(Data_Functor.functorArray)(renderMobileRecord)(mytSells);
+                                  })) ]) ]);
+                              };
+                              return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Halogen_HTML.slot(Data_Unit.unit)(Yzmall_Page_Part_Navbar.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageAccount))({
+                                  page: Yzmall_Page_Part_Navbar.Third.value
+                              })(Data_Void.absurd), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Halogen_Themes_Bootstrap4.px0)) ])([ Halogen_HTML_Elements.nav_([ renderNavTab, renderTabContent(state) ]) ]), Yzmall_Utils.renderFooter, Yzmall_Page_Part_MobileMenu.forMobileMenu, Yzmall_Page_Part_MobileMenu.mobileMenu(Yzmall_Page_Part_Navbar.Third.value) ]);
+                          };
+                          var initialState = function (v) {
+                              return {
+                                  currentAccount: Data_Maybe.Nothing.value,
+                                  sharedRecord: Network_RemoteData.NotAsked.value,
+                                  mytSells: Network_RemoteData.NotAsked.value
+                              };
+                          };
+                          var $$eval = function (v) {
+                              if (v instanceof Initialize) {
+                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Conduit_Component_Utils.guardAccount(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk))(Yzmall_Capability_Navigate.navigateHalogenM(dictNavigate)))(function (v1) {
+                                      if (v1 instanceof Data_Maybe.Nothing) {
+                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                      };
+                                      if (v1 instanceof Data_Maybe.Just) {
+                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Account.getAccountInfo(Yzmall_Api_Capablity_Resource_Account.manageAccountHalogenM(dictManageAccount)))(function (v2) {
+                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v3) {
+                                                  var $33 = {};
+                                                  for (var $34 in v3) {
+                                                      if ({}.hasOwnProperty.call(v3, $34)) {
+                                                          $33[$34] = v3[$34];
+                                                      };
+                                                  };
+                                                  $33.currentAccount = v2;
+                                                  return $33;
+                                              }))(function () {
+                                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new GetMytSells(v.value0)))))(function () {
+                                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new GetMytSharedRecord(v.value0)))))(function () {
+                                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                                      });
+                                                  });
+                                              });
+                                          });
+                                      };
+                                      throw new Error("Failed pattern match at Yzmall.Page.TradeCenter line 82, column 24 - line 89, column 20: " + [ v1.constructor.name ]);
+                                  }))(function () {
+                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                  });
+                              };
+                              if (v instanceof SellRebateMYT) {
+                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.getInputValue("rebate_myt_input")))(function (v1) {
+                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_CommodityOrder.createACTSellRebate(Yzmall_Api_Capablity_Resource_CommodityOrder.manageOrderHalogenM(dictManageOrder))(v1))(function (v2) {
+                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Applicative.when(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Maybe.isJust(v2))(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.alertMsg("\u521b\u5efaMYT\u51fa\u552e\u5355\u6210\u529f"))))(function () {
+                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Account.getAccountInfo(Yzmall_Api_Capablity_Resource_Account.manageAccountHalogenM(dictManageAccount)))(function (v3) {
+                                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v4) {
+                                                      var $41 = {};
+                                                      for (var $42 in v4) {
+                                                          if ({}.hasOwnProperty.call(v4, $42)) {
+                                                              $41[$42] = v4[$42];
+                                                          };
+                                                      };
+                                                      $41.currentAccount = v3;
+                                                      return $41;
+                                                  }))(function () {
+                                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_Reader_Class.ask(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk)))(function (v4) {
+                                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Effect_Ref.write(v3)(v4.currentAccount)))(function () {
+                                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new GetMytSharedRecord(v.value0)))))(function () {
+                                                                  return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                                              });
+                                                          });
+                                                      });
+                                                  });
+                                              });
+                                          });
+                                      });
+                                  });
+                              };
+                              if (v instanceof SellCommissionMYT) {
+                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_CommodityOrder.createMYTSellRush(Yzmall_Api_Capablity_Resource_CommodityOrder.manageOrderHalogenM(dictManageOrder)))(function (v1) {
+                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Applicative.when(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Maybe.isJust(v1))(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Yzmall_Page_Utils.alertMsg("\u521b\u5efaMYT\u51fa\u552e\u5355\u6210\u529f"))))(function () {
+                                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Account.getAccountInfo(Yzmall_Api_Capablity_Resource_Account.manageAccountHalogenM(dictManageAccount)))(function (v2) {
+                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v3) {
+                                                  var $49 = {};
+                                                  for (var $50 in v3) {
+                                                      if ({}.hasOwnProperty.call(v3, $50)) {
+                                                          $49[$50] = v3[$50];
+                                                      };
+                                                  };
+                                                  $49.currentAccount = v2;
+                                                  return $49;
+                                              }))(function () {
+                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_Reader_Class.ask(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk)))(function (v3) {
+                                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Effect_Ref.write(v2)(v3.currentAccount)))(function () {
+                                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new GetMytSharedRecord(v.value0)))))(function () {
+                                                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new GetMytSells(v.value0)))))(function () {
+                                                                  return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                                              });
+                                                          });
+                                                      });
+                                                  });
+                                              });
+                                          });
+                                      });
+                                  });
+                              };
+                              if (v instanceof GetMytSells) {
+                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_CommodityOrder.getACTSells(Yzmall_Api_Capablity_Resource_CommodityOrder.manageOrderHalogenM(dictManageOrder)))(function (v1) {
+                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v2) {
+                                          var $56 = {};
+                                          for (var $57 in v2) {
+                                              if ({}.hasOwnProperty.call(v2, $57)) {
+                                                  $56[$57] = v2[$57];
+                                              };
+                                          };
+                                          $56.mytSells = Network_RemoteData.fromMaybe(v1);
+                                          return $56;
+                                      }))(function () {
+                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                      });
+                                  });
+                              };
+                              if (v instanceof GetMytSharedRecord) {
+                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_CommodityOrder.mytSharedRecord(Yzmall_Api_Capablity_Resource_CommodityOrder.manageOrderHalogenM(dictManageOrder)))(function (v1) {
+                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v2) {
+                                          var $61 = {};
+                                          for (var $62 in v2) {
+                                              if ({}.hasOwnProperty.call(v2, $62)) {
+                                                  $61[$62] = v2[$62];
+                                              };
+                                          };
+                                          $61.sharedRecord = Network_RemoteData.fromMaybe(v1);
+                                          return $61;
+                                      }))(function () {
+                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                      });
+                                  });
+                              };
+                              throw new Error("Failed pattern match at Yzmall.Page.TradeCenter line 80, column 10 - line 121, column 13: " + [ v.constructor.name ]);
+                          };
+                          return Halogen_Component.lifecycleParentComponent(Data_Ord.ordUnit)({
+                              initialState: initialState,
+                              render: render,
+                              "eval": $$eval,
+                              receiver: Data_Function["const"](Data_Maybe.Nothing.value),
+                              initializer: Data_Maybe.Just.create(Halogen_Query.action(Initialize.create)),
+                              finalizer: Data_Maybe.Nothing.value
+                          });
+                      };
+                  };
+              };
+          };
+      };
+  };
+  exports["Initialize"] = Initialize;
+  exports["SellRebateMYT"] = SellRebateMYT;
+  exports["SellCommissionMYT"] = SellCommissionMYT;
+  exports["GetMytSells"] = GetMytSells;
+  exports["GetMytSharedRecord"] = GetMytSharedRecord;
   exports["component"] = component;
 })(PS["Yzmall.Page.TradeCenter"] = PS["Yzmall.Page.TradeCenter"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
   "use strict";
+  var Conduit_Component_Utils = PS["Conduit.Component.Utils"];
   var Control_Applicative = PS["Control.Applicative"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Monad_Reader = PS["Control.Monad.Reader"];
+  var Control_Monad_State_Class = PS["Control.Monad.State.Class"];
   var Data_Array = PS["Data.Array"];
   var Data_Function = PS["Data.Function"];
   var Data_Functor = PS["Data.Functor"];
+  var Data_Lens = PS["Data.Lens"];
+  var Data_Lens_Fold = PS["Data.Lens.Fold"];
+  var Data_Lens_Internal_Forget = PS["Data.Lens.Internal.Forget"];
   var Data_Maybe = PS["Data.Maybe"];
+  var Data_Maybe_First = PS["Data.Maybe.First"];
+  var Data_Ord = PS["Data.Ord"];
+  var Data_Ordering = PS["Data.Ordering"];
+  var Data_Ring = PS["Data.Ring"];
   var Data_Semigroup = PS["Data.Semigroup"];
   var Data_Show = PS["Data.Show"];
+  var Data_Unit = PS["Data.Unit"];
+  var Data_Void = PS["Data.Void"];
+  var Effect_Aff_Class = PS["Effect.Aff.Class"];
+  var Effect_Ref = PS["Effect.Ref"];
   var Formless = PS["Formless"];
   var Halogen = PS["Halogen"];
   var Halogen_Component = PS["Halogen.Component"];
@@ -33061,55 +39644,147 @@ var PS = {};
   var Halogen_HTML_Elements = PS["Halogen.HTML.Elements"];
   var Halogen_HTML_Events = PS["Halogen.HTML.Events"];
   var Halogen_HTML_Properties = PS["Halogen.HTML.Properties"];
+  var Halogen_Query = PS["Halogen.Query"];
   var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
   var Halogen_Themes_Bootstrap4 = PS["Halogen.Themes.Bootstrap4"];
+  var Network_RemoteData = PS["Network.RemoteData"];
   var Prelude = PS["Prelude"];
   var $$String = PS["String"];
+  var Yzmall_Api_Capablity_Resource_Account = PS["Yzmall.Api.Capablity.Resource.Account"];
+  var Yzmall_Capability_Navigate = PS["Yzmall.Capability.Navigate"];
+  var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
   var Yzmall_Data_Avatar = PS["Yzmall.Data.Avatar"];
+  var Yzmall_Data_Commission = PS["Yzmall.Data.Commission"];
   var Yzmall_Data_Commodity = PS["Yzmall.Data.Commodity"];
+  var Yzmall_Data_PreciseDateTime = PS["Yzmall.Data.PreciseDateTime"];
   var Yzmall_Page_Part_Login = PS["Yzmall.Page.Part.Login"];
   var Yzmall_Page_Part_MobileMenu = PS["Yzmall.Page.Part.MobileMenu"];
+  var Yzmall_Page_Part_Navbar = PS["Yzmall.Page.Part.Navbar"];
   var Yzmall_Page_Utils = PS["Yzmall.Page.Utils"];
-  var Yzmall_Utils = PS["Yzmall.Utils"];
-  var component = (function () {
-      var render = function (state) {
-          var renderPCRecord = function (record) {
-              return Halogen_HTML_Elements.tr([ Yzmall_Utils.style("border-top-color: #454545!important; border-bottom-color: #454545!important") ])([ Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("row") ])([ Halogen_HTML_Core.text(Data_Show.show(Data_Show.showInt)(record.id)) ]), Halogen_HTML_Elements.td_([ Halogen_HTML_Core.text(record.date) ]), Halogen_HTML_Elements.td([ Yzmall_Utils.style("color: #f8f2d8") ])([ Halogen_HTML_Core.text(record.name) ]), Halogen_HTML_Elements.td([ Yzmall_Utils.style(Yzmall_Page_Utils.yellowColor) ])([ Halogen_HTML_Core.text("\uffe5" + Data_Show.show(Data_Show.showNumber)(record.price)) ]), Halogen_HTML_Elements.td_([ Halogen_HTML_Core.text(record.status) ]) ]);
-          };
-          var renderMobileRecord = function (record) {
-              return Halogen_HTML_Elements.div([ Yzmall_Utils.style("height: 65px; background-color: #454545"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Halogen_Themes_Bootstrap4.mb3))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px2)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb1)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.py1)(Halogen_Themes_Bootstrap4.borderBottom)))))), Yzmall_Utils.style("border-bottom-color: #555555!important; font-size: 15px") ])([ Halogen_HTML_Core.text("\u8ba2\u5355\u7f16\u53f7 " + Data_Show.show(Data_Show.showInt)(record.id)), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.ml2) ])([ Halogen_HTML_Core.text(record.date) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto) ])([ Halogen_HTML_Core.text(record.status) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.px2))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.style("color: #f8f2d8"), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr4) ])([ Halogen_HTML_Core.text("\uffe5" + Data_Show.show(Data_Show.showNumber)(record.price)) ]), Halogen_HTML_Core.text(record.name + (" * " + Data_Show.show(Data_Show.showInt)(record.amount))) ]) ]);
-          };
-          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Yzmall_Utils.renderNavBar, Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Yzmall_Page_Utils.pcOnly)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mt2)(Halogen_Themes_Bootstrap4.px0)))), Yzmall_Utils.style("min-height: 633px") ])([ Halogen_HTML_Elements.table([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.table)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.tableStriped)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.tableDark)(Halogen_Themes_Bootstrap4.bgTransparent)))) ])(Data_Semigroup.append(Data_Semigroup.semigroupArray)([ Halogen_HTML_Elements.tr_([ Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u8ba2\u5355\u7f16\u53f7") ]), Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u521b\u5efa\u65f6\u95f4") ]), Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u5546\u54c1") ]), Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u91d1\u989d") ]), Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u72b6\u6001") ]) ]) ])(Data_Functor.map(Data_Functor.functorArray)(renderPCRecord)(state))) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Yzmall_Page_Utils.mobileOnly)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.mt2))))) ])(Data_Functor.map(Data_Functor.functorArray)(renderMobileRecord)(state)), Yzmall_Utils.renderFooter, Yzmall_Page_Part_MobileMenu.forMobileMenu, Yzmall_Page_Part_MobileMenu.mobileMenu, Yzmall_Page_Part_Login.renderLoginModal, Yzmall_Page_Part_Login.renderRegisterModal ]);
+  var Yzmall_Resource_Commodity = PS["Yzmall.Resource.Commodity"];
+  var Yzmall_Utils = PS["Yzmall.Utils"];                 
+  var Initialize = (function () {
+      function Initialize(value0) {
+          this.value0 = value0;
       };
-      var initialState = Data_Array.replicate(20)({
-          id: 123,
-          date: "2019-03-11 17:34:44",
-          price: 2.0,
-          name: "\u5c3c\u6cca\u5c14\u5c0f\u91d1\u521a\u5c3c\u6cca\u5c14\u5c0f\u91d1\u521a",
-          amount: 1,
-          status: "\u5df2\u552e\u51fa"
-      });
-      var $$eval = function (v) {
-          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+      Initialize.create = function (value0) {
+          return new Initialize(value0);
       };
-      return Halogen_Component.component(Halogen_HTML_Core.bifunctorHTML)({
-          initialState: Data_Function["const"](initialState),
-          render: render,
-          "eval": $$eval,
-          receiver: Data_Function["const"](Data_Maybe.Nothing.value)
-      });
+      return Initialize;
   })();
+  var GetCommissions = (function () {
+      function GetCommissions(value0) {
+          this.value0 = value0;
+      };
+      GetCommissions.create = function (value0) {
+          return new GetCommissions(value0);
+      };
+      return GetCommissions;
+  })();
+  var component = function (dictMonadAff) {
+      return function (dictManageAccount) {
+          return function (dictManageCommodity) {
+              return function (dictMonadAsk) {
+                  return function (dictNavigate) {
+                      var render = function (state) {
+                          var mbCommissions = Data_Functor.map(Data_Maybe.functorMaybe)(Data_Array.sortBy(function (a) {
+                              return function (b) {
+                                  var $9 = (b.id - a.id | 0) > 0;
+                                  if ($9) {
+                                      return Data_Ordering.GT.value;
+                                  };
+                                  return Data_Ordering.LT.value;
+                              };
+                          }))(Data_Lens_Fold.preview(Network_RemoteData._Success(Data_Lens_Internal_Forget.choiceForget(Data_Maybe_First.monoidFirst)))(state.commissions));
+                          var convert = function (v) {
+                              if (v === "WAIT_FOR_REVIEW") {
+                                  return "\u5f85\u5ba1\u6838";
+                              };
+                              if (v === "ON_SALE") {
+                                  return "\u51fa\u552e\u4e2d";
+                              };
+                              if (v === "SOLD") {
+                                  return "\u5df2\u51fa\u552e";
+                              };
+                              if (v === "DELIVERED") {
+                                  return "\u5df2\u6536\u8d27";
+                              };
+                              return "\u672a\u77e5\u72b6\u6001";
+                          };
+                          var renderMobileRecord = function (record) {
+                              var commodity = Yzmall_Page_Utils.getCommodityById(record.commodityId);
+                              return Halogen_HTML_Elements.div([ Yzmall_Utils.style(" background-color: #454545"), Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb3)(Halogen_Themes_Bootstrap4.py1)))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px2)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb1)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.pb1)(Halogen_Themes_Bootstrap4.borderBottom)))))), Yzmall_Utils.style("border-bottom-color: #555555!important; font-size: 15px") ])([ Halogen_HTML_Core.text("\u8ba2\u5355\u7f16\u53f7 " + Data_Show.show(Data_Show.showInt)(record.id)), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.ml2) ])([ Halogen_HTML_Core.text(Yzmall_Data_PreciseDateTime.toDisplayTime(record.createTime)) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mlAuto) ])([ Halogen_HTML_Core.text(convert(record.process)) ]) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.w100)(Halogen_Themes_Bootstrap4.px2))) ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.style("color: #f8f2d8"), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.mr4) ])([ Halogen_HTML_Core.text("MYT " + Data_Show.show(Data_Show.showNumber)(commodity.rebateMYT)) ]), Halogen_HTML_Core.text(commodity.name + (" * " + Data_Show.show(Data_Show.showInt)(record.amount))) ]) ]);
+                          };
+                          var renderPCRecord = function (record) {
+                              var commodity = Yzmall_Page_Utils.getCommodityById(record.commodityId);
+                              return Halogen_HTML_Elements.tr([ Yzmall_Utils.style("border-top-color: #454545!important; border-bottom-color: #454545!important") ])([ Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("row") ])([ Halogen_HTML_Core.text(Data_Show.show(Data_Show.showInt)(record.id)) ]), Halogen_HTML_Elements.td_([ Halogen_HTML_Core.text(Yzmall_Data_PreciseDateTime.toDisplayTime(record.createTime)) ]), Halogen_HTML_Elements.td([ Yzmall_Utils.style("color: #f8f2d8") ])([ Halogen_HTML_Core.text(commodity.name) ]), Halogen_HTML_Elements.td([ Yzmall_Utils.style(Yzmall_Page_Utils.yellowColor) ])([ Halogen_HTML_Core.text("MYT " + Data_Show.show(Data_Show.showNumber)(commodity.rebateMYT)) ]), Halogen_HTML_Elements.td_([ Halogen_HTML_Core.text(convert(record.process)) ]) ]);
+                          };
+                          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Halogen_HTML.slot(Data_Unit.unit)(Yzmall_Page_Part_Navbar.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageAccount))({
+                              page: Yzmall_Page_Part_Navbar.Fourth.value
+                          })(Data_Void.absurd), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Yzmall_Page_Utils.pcOnly)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mt2)(Halogen_Themes_Bootstrap4.px0)))), Yzmall_Utils.style("min-height: 633px") ])([ Halogen_HTML_Elements.table([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.table)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.tableStriped)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.tableDark)(Halogen_Themes_Bootstrap4.bgTransparent)))) ])(Data_Semigroup.append(Data_Semigroup.semigroupArray)([ Halogen_HTML_Elements.tr_([ Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u8ba2\u5355\u7f16\u53f7") ]), Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u521b\u5efa\u65f6\u95f4") ]), Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u5546\u54c1") ]), Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u91d1\u989d") ]), Halogen_HTML_Elements.th([ Yzmall_Utils.attr_("scope")("col") ])([ Halogen_HTML_Core.text("\u72b6\u6001") ]) ]) ])(Conduit_Component_Utils.maybeElemArray(mbCommissions)(function (cs) {
+                              return Data_Functor.map(Data_Functor.functorArray)(renderPCRecord)(cs);
+                          }))) ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Yzmall_Page_Utils.mobileOnly)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.mt2))))) ])(Conduit_Component_Utils.maybeElemArray(mbCommissions)(function (cs) {
+                              return Data_Functor.map(Data_Functor.functorArray)(renderMobileRecord)(cs);
+                          })), Yzmall_Utils.renderFooter, Yzmall_Page_Part_MobileMenu.forMobileMenu, Yzmall_Page_Part_MobileMenu.mobileMenu(Yzmall_Page_Part_Navbar.Fourth.value), Yzmall_Page_Part_Login.renderLoginModal, Yzmall_Page_Part_Login.renderRegisterModal ]);
+                      };
+                      var initialState = {
+                          commissions: Network_RemoteData.NotAsked.value
+                      };
+                      var $$eval = function (v) {
+                          if (v instanceof Initialize) {
+                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new GetCommissions(v.value0)))))(function () {
+                                  return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                              });
+                          };
+                          if (v instanceof GetCommissions) {
+                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Resource_Commodity.viewCommissions(Yzmall_Resource_Commodity.manageCommodityHalogenM(dictManageCommodity)))(function (v1) {
+                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v2) {
+                                      var $14 = {};
+                                      for (var $15 in v2) {
+                                          if ({}.hasOwnProperty.call(v2, $15)) {
+                                              $14[$15] = v2[$15];
+                                          };
+                                      };
+                                      $14.commissions = Network_RemoteData.fromMaybe(v1);
+                                      return $14;
+                                  }))(function () {
+                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                                  });
+                              });
+                          };
+                          throw new Error("Failed pattern match at Yzmall.Page.Wdds line 74, column 10 - line 81, column 13: " + [ v.constructor.name ]);
+                      };
+                      return Halogen_Component.lifecycleParentComponent(Data_Ord.ordUnit)({
+                          initialState: Data_Function["const"](initialState),
+                          render: render,
+                          "eval": $$eval,
+                          receiver: Data_Function["const"](Data_Maybe.Nothing.value),
+                          initializer: Data_Maybe.Just.create(Halogen_Query.action(Initialize.create)),
+                          finalizer: Data_Maybe.Nothing.value
+                      });
+                  };
+              };
+          };
+      };
+  };
+  exports["Initialize"] = Initialize;
+  exports["GetCommissions"] = GetCommissions;
   exports["component"] = component;
 })(PS["Yzmall.Page.Wdds"] = PS["Yzmall.Page.Wdds"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
   "use strict";
   var Control_Applicative = PS["Control.Applicative"];
+  var Control_Monad_Reader = PS["Control.Monad.Reader"];
   var Control_Monad_State = PS["Control.Monad.State"];
   var Data_Function = PS["Data.Function"];
   var Data_Maybe = PS["Data.Maybe"];
+  var Data_Ord = PS["Data.Ord"];
   var Data_Semigroup = PS["Data.Semigroup"];
-  var Data_Show = PS["Data.Show"];
+  var Data_Unit = PS["Data.Unit"];
+  var Data_Void = PS["Data.Void"];
+  var Effect_Aff_Class = PS["Effect.Aff.Class"];
+  var Effect_Ref = PS["Effect.Ref"];
   var Formless = PS["Formless"];
   var Halogen = PS["Halogen"];
   var Halogen_Component = PS["Halogen.Component"];
@@ -33118,40 +39793,87 @@ var PS = {};
   var Halogen_HTML_Elements = PS["Halogen.HTML.Elements"];
   var Halogen_HTML_Events = PS["Halogen.HTML.Events"];
   var Halogen_HTML_Properties = PS["Halogen.HTML.Properties"];
+  var Halogen_Query = PS["Halogen.Query"];
   var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
   var Halogen_Themes_Bootstrap4 = PS["Halogen.Themes.Bootstrap4"];
   var Prelude = PS["Prelude"];
   var $$String = PS["String"];
+  var Yzmall_Api_Capablity_Resource_Account = PS["Yzmall.Api.Capablity.Resource.Account"];
+  var Yzmall_Api_Capablity_Resource_Address = PS["Yzmall.Api.Capablity.Resource.Address"];
+  var Yzmall_Api_Capablity_Resource_CommodityOrder = PS["Yzmall.Api.Capablity.Resource.CommodityOrder"];
+  var Yzmall_Capability_Navigate = PS["Yzmall.Capability.Navigate"];
+  var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
   var Yzmall_Page_Part_Login = PS["Yzmall.Page.Part.Login"];
   var Yzmall_Page_Part_MobileMenu = PS["Yzmall.Page.Part.MobileMenu"];
-  var Yzmall_Utils = PS["Yzmall.Utils"];
-  var component = (function () {
-      var render = function (state) {
-          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Yzmall_Utils.renderNavBar, Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Halogen_Themes_Bootstrap4.px0)) ])([ Halogen_HTML_Elements.img([ Halogen_HTML_Properties.src("http://xiangqingkeji.com/poster/" + (Data_Show.show(Data_Show.showInt)(state) + ".jpg")), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.w100) ]) ]), Yzmall_Utils.renderFooter, Yzmall_Page_Part_MobileMenu.forMobileMenu, Yzmall_Page_Part_MobileMenu.mobileMenu, Yzmall_Page_Part_Login.renderLoginModal, Yzmall_Page_Part_Login.renderRegisterModal ]);
+  var Yzmall_Page_Part_Navbar = PS["Yzmall.Page.Part.Navbar"];
+  var Yzmall_Resource_Commodity = PS["Yzmall.Resource.Commodity"];
+  var Yzmall_Utils = PS["Yzmall.Utils"];                 
+  var Initialize = (function () {
+      function Initialize(value0) {
+          this.value0 = value0;
       };
-      var $$eval = function (v) {
-          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+      Initialize.create = function (value0) {
+          return new Initialize(value0);
       };
-      return Halogen_Component.component(Halogen_HTML_Core.bifunctorHTML)({
-          initialState: Data_Function["const"](1770724),
-          render: render,
-          "eval": $$eval,
-          receiver: Data_Function["const"](Data_Maybe.Nothing.value)
-      });
+      return Initialize;
   })();
+  var component = function (dictMonadAff) {
+      return function (dictManageCommodity) {
+          return function (dictManageAccount) {
+              return function (dictManageOrder) {
+                  return function (dictManageAddress) {
+                      return function (dictMonadAsk) {
+                          return function (dictNavigate) {
+                              var render = function (state) {
+                                  return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Halogen_HTML.slot(Data_Unit.unit)(Yzmall_Page_Part_Navbar.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageAccount))({
+                                      page: Yzmall_Page_Part_Navbar.Fourth.value
+                                  })(Data_Void.absurd), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Halogen_Themes_Bootstrap4.px0)) ])([ Halogen_HTML_Elements.img([ Halogen_HTML_Properties.src("http://www.scix.vip/yzmall-server/account/mine/invitation.jpg"), Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.w100) ]) ]), Yzmall_Utils.renderFooter, Yzmall_Page_Part_MobileMenu.forMobileMenu, Yzmall_Page_Part_MobileMenu.mobileMenu(Yzmall_Page_Part_Navbar.Fourth.value), Yzmall_Page_Part_Login.renderLoginModal, Yzmall_Page_Part_Login.renderRegisterModal ]);
+                              };
+                              var $$eval = function (v) {
+                                  return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                              };
+                              return Halogen_Component.lifecycleParentComponent(Data_Ord.ordUnit)({
+                                  initialState: Data_Function["const"](1770724),
+                                  render: render,
+                                  "eval": $$eval,
+                                  receiver: Data_Function["const"](Data_Maybe.Nothing.value),
+                                  initializer: Data_Maybe.Just.create(Halogen_Query.action(Initialize.create)),
+                                  finalizer: Data_Maybe.Nothing.value
+                              });
+                          };
+                      };
+                  };
+              };
+          };
+      };
+  };
+  exports["Initialize"] = Initialize;
   exports["component"] = component;
 })(PS["Yzmall.Page.Wdfx"] = PS["Yzmall.Page.Wdfx"] || {});
 (function(exports) {
   // Generated by purs version 0.12.1
   "use strict";
   var Affjax_RequestBody = PS["Affjax.RequestBody"];
+  var Conduit_Component_Utils = PS["Conduit.Component.Utils"];
   var Control_Applicative = PS["Control.Applicative"];
+  var Control_Bind = PS["Control.Bind"];
+  var Control_Monad_Reader = PS["Control.Monad.Reader"];
+  var Control_Monad_State_Class = PS["Control.Monad.State.Class"];
   var Data_Array = PS["Data.Array"];
+  var Data_Eq = PS["Data.Eq"];
   var Data_Function = PS["Data.Function"];
   var Data_Functor = PS["Data.Functor"];
+  var Data_Lens = PS["Data.Lens"];
+  var Data_Lens_Fold = PS["Data.Lens.Fold"];
+  var Data_Lens_Internal_Forget = PS["Data.Lens.Internal.Forget"];
   var Data_Maybe = PS["Data.Maybe"];
+  var Data_Maybe_First = PS["Data.Maybe.First"];
+  var Data_Ord = PS["Data.Ord"];
   var Data_Semigroup = PS["Data.Semigroup"];
-  var Data_Show = PS["Data.Show"];
+  var Data_Unit = PS["Data.Unit"];
+  var Data_Void = PS["Data.Void"];
+  var Effect_Aff_Class = PS["Effect.Aff.Class"];
+  var Effect_Ref = PS["Effect.Ref"];
   var Formless = PS["Formless"];
   var Halogen = PS["Halogen"];
   var Halogen_Component = PS["Halogen.Component"];
@@ -33160,41 +39882,110 @@ var PS = {};
   var Halogen_HTML_Elements = PS["Halogen.HTML.Elements"];
   var Halogen_HTML_Events = PS["Halogen.HTML.Events"];
   var Halogen_HTML_Properties = PS["Halogen.HTML.Properties"];
+  var Halogen_Query = PS["Halogen.Query"];
   var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
   var Halogen_Themes_Bootstrap4 = PS["Halogen.Themes.Bootstrap4"];
+  var Network_RemoteData = PS["Network.RemoteData"];
   var Prelude = PS["Prelude"];
   var $$String = PS["String"];
+  var Yzmall_Api_Capablity_Resource_Account = PS["Yzmall.Api.Capablity.Resource.Account"];
+  var Yzmall_Capability_Navigate = PS["Yzmall.Capability.Navigate"];
+  var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
   var Yzmall_Data_Avatar = PS["Yzmall.Data.Avatar"];
   var Yzmall_Data_Commodity = PS["Yzmall.Data.Commodity"];
   var Yzmall_Page_Part_Login = PS["Yzmall.Page.Part.Login"];
   var Yzmall_Page_Part_MobileMenu = PS["Yzmall.Page.Part.MobileMenu"];
+  var Yzmall_Page_Part_Navbar = PS["Yzmall.Page.Part.Navbar"];
   var Yzmall_Page_Utils = PS["Yzmall.Page.Utils"];
-  var Yzmall_Utils = PS["Yzmall.Utils"];
-  var component = (function () {
-      var render = function (state) {
-          var renderRecord = function (record) {
-              return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb1)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.bgTransparent)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.borderBottom)(Halogen_Themes_Bootstrap4.px0)))))), Yzmall_Utils.style("height: 72px; font-size: 15px; border-bottom-color: #555555!important") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.row)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mw100)(Halogen_Themes_Bootstrap4.mx0))) ])([ Halogen_HTML_Elements.img([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd1)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.myAuto)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Halogen_Themes_Bootstrap4.mxAuto)))))), Halogen_HTML_Properties.src(record.iconSrc), Yzmall_Utils.style("max-width: 60px; max-height: 60px;") ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd11)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col9)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Halogen_Themes_Bootstrap4.alignContentBetween))))) ])([ Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text(record.name + (" \uff08" + (record.vipLevel + "\uff09"))) ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text(record.date) ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text("\u63a8\u5e7f " + Data_Show.show(Data_Show.showInt)(record.amount)) ]) ]) ]) ]);
-          };
-          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Yzmall_Utils.renderNavBar, Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.mt2)))), Yzmall_Utils.style("min-height: 633px") ])(Data_Functor.map(Data_Functor.functorArray)(renderRecord)(state)), Yzmall_Utils.renderFooter, Yzmall_Page_Part_MobileMenu.forMobileMenu, Yzmall_Page_Part_MobileMenu.mobileMenu, Yzmall_Page_Part_Login.renderLoginModal, Yzmall_Page_Part_Login.renderRegisterModal ]);
+  var Yzmall_Utils = PS["Yzmall.Utils"];                 
+  var Initialize = (function () {
+      function Initialize(value0) {
+          this.value0 = value0;
       };
-      var initialState = Data_Array.replicate(8)({
-          iconSrc: "https://randomuser.me/api/portraits/women/60.jpg",
-          date: "2019-03-11",
-          price: 2.0,
-          name: "\u9c7c\u9f99\u6f5c\u8dc3\u89c2\u9053\u8eab",
-          amount: 1,
-          vipLevel: "VIP\u4f1a\u5458"
-      });
-      var $$eval = function (v) {
-          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+      Initialize.create = function (value0) {
+          return new Initialize(value0);
       };
-      return Halogen_Component.component(Halogen_HTML_Core.bifunctorHTML)({
-          initialState: Data_Function["const"](initialState),
-          render: render,
-          "eval": $$eval,
-          receiver: Data_Function["const"](Data_Maybe.Nothing.value)
-      });
+      return Initialize;
   })();
+  var Invitees = (function () {
+      function Invitees(value0) {
+          this.value0 = value0;
+      };
+      Invitees.create = function (value0) {
+          return new Invitees(value0);
+      };
+      return Invitees;
+  })();
+  var component = function (dictMonadAff) {
+      return function (dictManageAccount) {
+          return function (dictMonadAsk) {
+              return function (dictNavigate) {
+                  var render = function (state) {
+                      var mbAccounts = Data_Lens_Fold.preview(Network_RemoteData._Success(Data_Lens_Internal_Forget.choiceForget(Data_Maybe_First.monoidFirst)))(state.accounts);
+                      var grade = function (v) {
+                          if (v === 1) {
+                              return "VIP\u4f1a\u5458";
+                          };
+                          if (v === 2) {
+                              return "\u603b\u76d1";
+                          };
+                          if (v === 3) {
+                              return "\u603b\u88c1";
+                          };
+                          return "\u7528\u6237";
+                      };
+                      var renderRecord = function (account) {
+                          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.textWhite)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mb1)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.bgTransparent)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.borderBottom)(Halogen_Themes_Bootstrap4.px0)))))), Yzmall_Utils.style("height: 72px; font-size: 15px; border-bottom-color: #555555!important") ])([ Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.row)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mw100)(Halogen_Themes_Bootstrap4.mx0))) ])([ Halogen_HTML_Elements.img([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd1)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col3)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.myAuto)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dBlock)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.px0)(Halogen_Themes_Bootstrap4.mxAuto)))))), Halogen_HTML_Properties.src("./image/default.png"), Yzmall_Utils.style("max-width: 60px; max-height: 60px;") ]), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.colMd11)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.col9)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.dFlex)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Halogen_Themes_Bootstrap4.alignContentBetween))))) ])([ Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text(account.nickname) ]), Halogen_HTML_Elements.div_([ Halogen_HTML_Core.text(grade(account.grade)) ]) ]) ]) ]);
+                      };
+                      return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.containerFluid)(Halogen_Themes_Bootstrap4.px0)), Yzmall_Utils.style("overflow-x: hidden; background-image: url(" + ($$String.bgCommodity + ")")) ])([ Yzmall_Utils.renderHeader, Halogen_HTML.slot(Data_Unit.unit)(Yzmall_Page_Part_Navbar.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageAccount))({
+                          page: Yzmall_Page_Part_Navbar.Fourth.value
+                      })(Data_Void.absurd), Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.container)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.flexColumn)(Data_Semigroup.append(Halogen_HTML_Core.semigroupClassName)(Halogen_Themes_Bootstrap4.mxAuto)(Halogen_Themes_Bootstrap4.mt2)))), Yzmall_Utils.style("min-height: 633px") ])(Data_Semigroup.append(Data_Semigroup.semigroupArray)(Conduit_Component_Utils.maybeElemArray(mbAccounts)(function (accounts) {
+                          return Data_Functor.map(Data_Functor.functorArray)(renderRecord)(accounts);
+                      }))([ Conduit_Component_Utils.whenElem(Data_Eq.eq(Data_Maybe.eqMaybe(Data_Eq.eqInt))(Data_Functor.map(Data_Maybe.functorMaybe)(Data_Array.length)(mbAccounts))(new Data_Maybe.Just(0)))(function (v) {
+                          return Halogen_HTML_Elements.div([ Yzmall_Utils.cls(Halogen_Themes_Bootstrap4.textWhite) ])([ Halogen_HTML_Core.text("\u6682\u65f6\u6ca1\u6709\u4efb\u4f55\u63a8\u5e7f") ]);
+                      }) ])), Yzmall_Utils.renderFooter, Yzmall_Page_Part_MobileMenu.forMobileMenu, Yzmall_Page_Part_MobileMenu.mobileMenu(Yzmall_Page_Part_Navbar.Fourth.value) ]);
+                  };
+                  var initialState = {
+                      accounts: Network_RemoteData.NotAsked.value
+                  };
+                  var $$eval = function (v) {
+                      if (v instanceof Initialize) {
+                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Data_Functor["void"](Halogen_Query_HalogenM.functorHalogenM)(Halogen_Query_HalogenM.fork(dictMonadAff)($$eval(new Invitees(v.value0)))))(function () {
+                              return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                          });
+                      };
+                      if (v instanceof Invitees) {
+                          return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Yzmall_Api_Capablity_Resource_Account.getInvitees(Yzmall_Api_Capablity_Resource_Account.manageAccountHalogenM(dictManageAccount)))(function (v1) {
+                              return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v2) {
+                                  var $13 = {};
+                                  for (var $14 in v2) {
+                                      if ({}.hasOwnProperty.call(v2, $14)) {
+                                          $13[$14] = v2[$14];
+                                      };
+                                  };
+                                  $13.accounts = Network_RemoteData.fromMaybe(v1);
+                                  return $13;
+                              }))(function () {
+                                  return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value0);
+                              });
+                          });
+                      };
+                      throw new Error("Failed pattern match at Yzmall.Page.Wdtg line 70, column 10 - line 77, column 13: " + [ v.constructor.name ]);
+                  };
+                  return Halogen_Component.lifecycleParentComponent(Data_Ord.ordUnit)({
+                      initialState: Data_Function["const"](initialState),
+                      render: render,
+                      "eval": $$eval,
+                      receiver: Data_Function["const"](Data_Maybe.Nothing.value),
+                      initializer: Data_Maybe.Just.create(Halogen_Query.action(Initialize.create)),
+                      finalizer: Data_Maybe.Nothing.value
+                  });
+              };
+          };
+      };
+  };
+  exports["Initialize"] = Initialize;
+  exports["Invitees"] = Invitees;
   exports["component"] = component;
 })(PS["Yzmall.Page.Wdtg"] = PS["Yzmall.Page.Wdtg"] || {});
 (function(exports) {
@@ -33203,33 +39994,44 @@ var PS = {};
   var Control_Applicative = PS["Control.Applicative"];
   var Control_Bind = PS["Control.Bind"];
   var Control_Monad_Reader = PS["Control.Monad.Reader"];
+  var Control_Monad_Reader_Class = PS["Control.Monad.Reader.Class"];
   var Control_Monad_State_Class = PS["Control.Monad.State.Class"];
   var Data_Either = PS["Data.Either"];
   var Data_Either_Nested = PS["Data.Either.Nested"];
   var Data_Eq = PS["Data.Eq"];
   var Data_Function = PS["Data.Function"];
+  var Data_Functor_Coproduct = PS["Data.Functor.Coproduct"];
   var Data_Functor_Coproduct_Nested = PS["Data.Functor.Coproduct.Nested"];
   var Data_Maybe = PS["Data.Maybe"];
   var Data_Ord = PS["Data.Ord"];
   var Data_Unit = PS["Data.Unit"];
   var Data_Void = PS["Data.Void"];
   var Effect_Aff_Class = PS["Effect.Aff.Class"];
+  var Effect_Class = PS["Effect.Class"];
   var Effect_Ref = PS["Effect.Ref"];
   var Halogen = PS["Halogen"];
   var Halogen_Component = PS["Halogen.Component"];
   var Halogen_Component_ChildPath = PS["Halogen.Component.ChildPath"];
   var Halogen_HTML = PS["Halogen.HTML"];
+  var Halogen_Query = PS["Halogen.Query"];
   var Halogen_Query_HalogenM = PS["Halogen.Query.HalogenM"];
   var Prelude = PS["Prelude"];
+  var Slug = PS["Slug"];
   var Yzmall_Api_Capablity_Resource_Account = PS["Yzmall.Api.Capablity.Resource.Account"];
+  var Yzmall_Api_Capablity_Resource_Address = PS["Yzmall.Api.Capablity.Resource.Address"];
+  var Yzmall_Api_Capablity_Resource_BankCard = PS["Yzmall.Api.Capablity.Resource.BankCard"];
+  var Yzmall_Api_Capablity_Resource_CommodityOrder = PS["Yzmall.Api.Capablity.Resource.CommodityOrder"];
   var Yzmall_Capability_LogMessages = PS["Yzmall.Capability.LogMessages"];
   var Yzmall_Capability_Navigate = PS["Yzmall.Capability.Navigate"];
   var Yzmall_Capability_Now = PS["Yzmall.Capability.Now"];
+  var Yzmall_Component_Router2 = PS["Yzmall.Component.Router2"];
   var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
   var Yzmall_Data_Route = PS["Yzmall.Data.Route"];
+  var Yzmall_Data_Route2 = PS["Yzmall.Data.Route2"];
   var Yzmall_Page_Commodity = PS["Yzmall.Page.Commodity"];
   var Yzmall_Page_CommodityInfo = PS["Yzmall.Page.CommodityInfo"];
-  var Yzmall_Page_PersonalCenter = PS["Yzmall.Page.PersonalCenter"];
+  var Yzmall_Page_PayOrderPage = PS["Yzmall.Page.PayOrderPage"];
+  var Yzmall_Page_PurchaseConfirm = PS["Yzmall.Page.PurchaseConfirm"];
   var Yzmall_Page_TradeCenter = PS["Yzmall.Page.TradeCenter"];
   var Yzmall_Page_Wdds = PS["Yzmall.Page.Wdds"];
   var Yzmall_Page_Wdfx = PS["Yzmall.Page.Wdfx"];
@@ -33254,58 +40056,118 @@ var PS = {};
                   return function (dictNavigate) {
                       return function (dictManageAccount) {
                           return function (dictManageCommodity) {
-                              var render = function (v) {
-                                  if (v.route instanceof Yzmall_Data_Route.RegularCommodity) {
-                                      return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp1)(Data_Unit.unit)(Yzmall_Page_Commodity.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageCommodity))(Data_Unit.unit)(Data_Void.absurd);
-                                  };
-                                  if (v.route instanceof Yzmall_Data_Route.AccountInfo) {
-                                      return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp2)(Data_Unit.unit)(Yzmall_Page_PersonalCenter.component(Data_Maybe.Nothing.value))(Data_Unit.unit)(Data_Void.absurd);
-                                  };
-                                  if (v.route instanceof Yzmall_Data_Route.CommodityInfo) {
-                                      return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp3)(Data_Unit.unit)(Yzmall_Page_CommodityInfo.component(dictMonadAff)(dictManageCommodity)(dictManageAccount)(dictMonadAsk)(dictNavigate))({
-                                          slug: v.route.value0
-                                      })(Data_Void.absurd);
-                                  };
-                                  if (v.route instanceof Yzmall_Data_Route.WDDS_ROUTE) {
-                                      return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp4)(Data_Unit.unit)(Yzmall_Page_Wdds.component)(Data_Unit.unit)(Data_Void.absurd);
-                                  };
-                                  if (v.route instanceof Yzmall_Data_Route.WDTG_ROUTE) {
-                                      return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp5)(Data_Unit.unit)(Yzmall_Page_Wdtg.component)(Data_Unit.unit)(Data_Void.absurd);
-                                  };
-                                  if (v.route instanceof Yzmall_Data_Route.WDFX_ROUTE) {
-                                      return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp6)(Data_Unit.unit)(Yzmall_Page_Wdfx.component)(Data_Unit.unit)(Data_Void.absurd);
-                                  };
-                                  if (v.route instanceof Yzmall_Data_Route.TradeCenter) {
-                                      return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp7)(Data_Unit.unit)(Yzmall_Page_TradeCenter.component)(Data_Unit.unit)(Data_Void.absurd);
-                                  };
-                                  return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp1)(Data_Unit.unit)(Yzmall_Page_Commodity.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageCommodity))(Data_Unit.unit)(Data_Void.absurd);
-                              };
-                              var $$eval = function (v) {
-                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.get(Halogen_Query_HalogenM.monadStateHalogenM))(function (v1) {
-                                      return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Applicative.when(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Eq.notEq(Yzmall_Data_Route.eqRoute)(v1.route)(v.value0))(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v2) {
-                                          var $17 = {};
-                                          for (var $18 in v2) {
-                                              if ({}.hasOwnProperty.call(v2, $18)) {
-                                                  $17[$18] = v2[$18];
+                              return function (dictManageOrder) {
+                                  return function (dictManageAddress) {
+                                      return function (dictManageBankCard) {
+                                          var render = function (v) {
+                                              if (v.route instanceof Yzmall_Data_Route.Home) {
+                                                  return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp1)(Data_Unit.unit)(Yzmall_Page_Commodity.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageCommodity)(dictManageAccount))({
+                                                      isRegular: v.route.value0,
+                                                      hometype: v.route.value1
+                                                  })(Data_Void.absurd);
                                               };
+                                              if (v.route instanceof Yzmall_Data_Route.RegularCommodity) {
+                                                  return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp1)(Data_Unit.unit)(Yzmall_Page_Commodity.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageCommodity)(dictManageAccount))({
+                                                      isRegular: true,
+                                                      hometype: v.route.value0
+                                                  })(Data_Void.absurd);
+                                              };
+                                              if (v.route instanceof Yzmall_Data_Route.SpecialCommodity) {
+                                                  return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp1)(Data_Unit.unit)(Yzmall_Page_Commodity.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageCommodity)(dictManageAccount))({
+                                                      isRegular: false,
+                                                      hometype: v.route.value0
+                                                  })(Data_Void.absurd);
+                                              };
+                                              if (v.route instanceof Yzmall_Data_Route.PC_ROUTER) {
+                                                  return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp8)(Data_Unit.unit)(Yzmall_Component_Router2.component(dictMonadAff)(dictMonadAsk)(dictNow)(dictLogMessages)(dictNavigate)(dictManageAccount)(dictManageCommodity)(dictManageOrder)(dictManageAddress)(dictManageBankCard))(v.route.value0)(Data_Void.absurd);
+                                              };
+                                              if (v.route instanceof Yzmall_Data_Route.CommodityInfo) {
+                                                  return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp3)(Data_Unit.unit)(Yzmall_Page_CommodityInfo.component(dictMonadAff)(dictManageCommodity)(dictManageAccount)(dictMonadAsk)(dictNavigate))({
+                                                      slug: v.route.value0
+                                                  })(Data_Void.absurd);
+                                              };
+                                              if (v.route instanceof Yzmall_Data_Route.WDDS_ROUTE) {
+                                                  return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp4)(Data_Unit.unit)(Yzmall_Page_Wdds.component(dictMonadAff)(dictManageAccount)(dictManageCommodity)(dictMonadAsk)(dictNavigate))(Data_Unit.unit)(Data_Void.absurd);
+                                              };
+                                              if (v.route instanceof Yzmall_Data_Route.WDTG_ROUTE) {
+                                                  return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp5)(Data_Unit.unit)(Yzmall_Page_Wdtg.component(dictMonadAff)(dictManageAccount)(dictMonadAsk)(dictNavigate))(Data_Unit.unit)(Data_Void.absurd);
+                                              };
+                                              if (v.route instanceof Yzmall_Data_Route.WDFX_ROUTE) {
+                                                  return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp6)(Data_Unit.unit)(Yzmall_Page_Wdfx.component(dictMonadAff)(dictManageCommodity)(dictManageAccount)(dictManageOrder)(dictManageAddress)(dictMonadAsk)(dictNavigate))(Data_Unit.unit)(Data_Void.absurd);
+                                              };
+                                              if (v.route instanceof Yzmall_Data_Route.TradeCenter) {
+                                                  return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp7)(Data_Unit.unit)(Yzmall_Page_TradeCenter.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageCommodity)(dictManageOrder)(dictManageAccount))(Data_Unit.unit)(Data_Void.absurd);
+                                              };
+                                              if (v.route instanceof Yzmall_Data_Route.PurchaseConfirm) {
+                                                  return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp2)(Data_Unit.unit)(Yzmall_Page_PurchaseConfirm.component(dictMonadAff)(dictManageCommodity)(dictManageAccount)(dictManageOrder)(dictManageAddress)(dictManageBankCard)(dictMonadAsk)(dictNavigate))({
+                                                      slug: v.route.value0,
+                                                      isSpecial: false
+                                                  })(Data_Void.absurd);
+                                              };
+                                              if (v.route instanceof Yzmall_Data_Route.SpecialPurchaseConfirm) {
+                                                  return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp2)(Data_Unit.unit)(Yzmall_Page_PurchaseConfirm.component(dictMonadAff)(dictManageCommodity)(dictManageAccount)(dictManageOrder)(dictManageAddress)(dictManageBankCard)(dictMonadAsk)(dictNavigate))({
+                                                      slug: v.route.value0,
+                                                      isSpecial: true
+                                                  })(Data_Void.absurd);
+                                              };
+                                              if (v.route instanceof Yzmall_Data_Route.PayOrder) {
+                                                  return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp9)(Data_Unit.unit)(Yzmall_Page_PayOrderPage.component(dictMonadAff)(dictManageCommodity)(dictManageAccount)(dictManageOrder)(dictManageAddress)(dictManageBankCard)(dictMonadAsk)(dictNavigate))(v.route.value0)(Data_Void.absurd);
+                                              };
+                                              return Halogen_HTML["slot'"](Halogen_Component_ChildPath.cp1)(Data_Unit.unit)(Yzmall_Page_Commodity.component(dictMonadAff)(dictMonadAsk)(dictNavigate)(dictManageCommodity)(dictManageAccount))({
+                                                  isRegular: true,
+                                                  hometype: Yzmall_Data_Route.NormalHome.value
+                                              })(Data_Void.absurd);
                                           };
-                                          $17.route = v.value0;
-                                          return $17;
-                                      })))(function () {
-                                          return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value1);
-                                      });
-                                  });
-                              };
-                              return Halogen_Component.parentComponent(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Ord.ordVoid))))))))({
-                                  initialState: function (initialRoute) {
-                                      return {
-                                          route: Data_Maybe.fromMaybe(Yzmall_Data_Route.Home.value)(initialRoute)
+                                          var $$eval = function (v) {
+                                              return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.get(Halogen_Query_HalogenM.monadStateHalogenM))(function (v1) {
+                                                  return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Applicative.when(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Eq.notEq(Yzmall_Data_Route.eqRoute)(v1.route)(v.value0))(Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_State_Class.modify_(Halogen_Query_HalogenM.monadStateHalogenM)(function (v2) {
+                                                      var $32 = {};
+                                                      for (var $33 in v2) {
+                                                          if ({}.hasOwnProperty.call(v2, $33)) {
+                                                              $32[$33] = v2[$33];
+                                                          };
+                                                      };
+                                                      $32.route = v.value0;
+                                                      return $32;
+                                                  }))(function () {
+                                                      return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Control_Monad_Reader_Class.ask(Halogen_Query_HalogenM.monadAskHalogenM(dictMonadAsk)))(function (v2) {
+                                                          return Control_Bind.discard(Control_Bind.discardUnit)(Halogen_Query_HalogenM.bindHalogenM)(Effect_Class.liftEffect(Halogen_Query_HalogenM.monadEffectHalogenM(dictMonadAff.MonadEffect0()))(Effect_Ref.write(new Data_Maybe.Just(v1.route))(v2.lastRoute)))(function () {
+                                                              if (v.value0 instanceof Yzmall_Data_Route.RegularCommodity) {
+                                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Halogen_Query["query'"](Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Eq.eqVoid))))))))))(Halogen_Component_ChildPath.cp1)(Data_Unit.unit)(Halogen_Query.action(Yzmall_Page_Commodity.Reset.create(true)(v.value0.value0))))(function (v3) {
+                                                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                                                  });
+                                                              };
+                                                              if (v.value0 instanceof Yzmall_Data_Route.SpecialCommodity) {
+                                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Halogen_Query["query'"](Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Eq.eqVoid))))))))))(Halogen_Component_ChildPath.cp1)(Data_Unit.unit)(Halogen_Query.action(Yzmall_Page_Commodity.Reset.create(false)(v.value0.value0))))(function (v3) {
+                                                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                                                  });
+                                                              };
+                                                              if (v.value0 instanceof Yzmall_Data_Route.PC_ROUTER) {
+                                                                  return Control_Bind.bind(Halogen_Query_HalogenM.bindHalogenM)(Halogen_Query["query'"](Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Either.eqEither(Data_Eq.eqUnit)(Data_Eq.eqVoid))))))))))(Halogen_Component_ChildPath.cp8)(Data_Unit.unit)(Halogen_Query.action(Yzmall_Component_Router2.Navigate.create(Data_Maybe.fromMaybe(Yzmall_Data_Route2.PersonalCenter.value)(v.value0.value0)))))(function (v3) {
+                                                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                                                  });
+                                                              };
+                                                              return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(Data_Unit.unit);
+                                                          });
+                                                      });
+                                                  })))(function () {
+                                                      return Control_Applicative.pure(Halogen_Query_HalogenM.applicativeHalogenM)(v.value1);
+                                                  });
+                                              });
+                                          };
+                                          return Halogen_Component.parentComponent(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Either.ordEither(Data_Ord.ordUnit)(Data_Ord.ordVoid))))))))))({
+                                              initialState: function (initialRoute) {
+                                                  return {
+                                                      route: Data_Maybe.fromMaybe(new Yzmall_Data_Route.Home(true, Yzmall_Data_Route.NormalHome.value))(initialRoute)
+                                                  };
+                                              },
+                                              render: render,
+                                              "eval": $$eval,
+                                              receiver: Data_Function["const"](Data_Maybe.Nothing.value)
+                                          });
                                       };
-                                  },
-                                  render: render,
-                                  "eval": $$eval,
-                                  receiver: Data_Function["const"](Data_Maybe.Nothing.value)
-                              });
+                                  };
+                              };
                           };
                       };
                   };
@@ -33320,10 +40182,10 @@ var PS = {};
   // Generated by purs version 0.12.1
   "use strict";
   var Affjax = PS["Affjax"];
+  var Affjax_ResponseFormat = PS["Affjax.ResponseFormat"];
   var Control_Applicative = PS["Control.Applicative"];
   var Control_Bind = PS["Control.Bind"];
   var Data_Argonaut_Encode = PS["Data.Argonaut.Encode"];
-  var Data_Argonaut_Encode_Class = PS["Data.Argonaut.Encode.Class"];
   var Data_Bifunctor = PS["Data.Bifunctor"];
   var Data_Either = PS["Data.Either"];
   var Data_Eq = PS["Data.Eq"];
@@ -33333,7 +40195,6 @@ var PS = {};
   var Data_HTTP_Method = PS["Data.HTTP.Method"];
   var Data_Maybe = PS["Data.Maybe"];
   var Data_Show = PS["Data.Show"];
-  var Data_Symbol = PS["Data.Symbol"];
   var Data_Unit = PS["Data.Unit"];
   var Effect = PS["Effect"];
   var Effect_Aff = PS["Effect.Aff"];
@@ -33361,65 +40222,67 @@ var PS = {};
   var Yzmall_Capability_LogMessages = PS["Yzmall.Capability.LogMessages"];
   var Yzmall_Component_Router = PS["Yzmall.Component.Router"];
   var Yzmall_Data_Account = PS["Yzmall.Data.Account"];
-  var Yzmall_Data_Phone = PS["Yzmall.Data.Phone"];
   var Yzmall_Data_Route = PS["Yzmall.Data.Route"];
-  var Yzmall_Page_Commodity = PS["Yzmall.Page.Commodity"];
-  var Yzmall_Page_CommodityInfo = PS["Yzmall.Page.CommodityInfo"];
-  var Yzmall_Page_PersonalCenter = PS["Yzmall.Page.PersonalCenter"];
-  var Yzmall_Page_Wdds = PS["Yzmall.Page.Wdds"];
-  var Yzmall_Page_Wdtg = PS["Yzmall.Page.Wdtg"];                 
+  var Yzmall_Page_Utils = PS["Yzmall.Page.Utils"];                 
+  var tryLogin = Control_Applicative.pure(Effect.applicativeEffect)(new Data_Maybe.Just({
+      endpoint: Yzmall_Api_Endpoint.MyAccountInfo.value,
+      method: Yzmall_Api_Request.Get.value
+  }));
   var testLog = function (v) {
       if (v instanceof Data_Either.Left) {
           return Effect_Console.log(v.value0);
       };
       if (v instanceof Data_Either.Right) {
-          return Effect_Console.log(Data_Show.show(Yzmall_Data_Phone.showPhone)(v.value0.phone));
+          return Effect_Console.log(Data_Show.show(Data_Maybe.showMaybe(Data_Show.showInt))(v.value0.defaultAddress));
       };
-      throw new Error("Failed pattern match at Main line 108, column 1 - line 108, column 48: " + [ v.constructor.name ]);
+      throw new Error("Failed pattern match at Main line 86, column 1 - line 86, column 48: " + [ v.constructor.name ]);
   };
   var main = Halogen_Aff_Util.runHalogenAff(Control_Bind.bind(Effect_Aff.bindAff)(Halogen_Aff_Util.awaitBody)(function (v) {
-      return Control_Bind.bind(Effect_Aff.bindAff)(Effect_Class.liftEffect(Effect_Aff.monadEffectAff)(Effect_Ref["new"](Data_Maybe.Nothing.value)))(function (v1) {
-          return Control_Bind.bind(Effect_Aff.bindAff)(Effect_Class.liftEffect(Effect_Aff.monadEffectAff)(Routing_Hash.getHash))(function (v2) {
-              var initialRoute = Data_Either.hush(Routing_Duplex.parse(Yzmall_Data_Route.routeCodec)(v2));
-              var environment = {
-                  currentAccount: v1,
-                  baseUrl: "http://192.168.0.138:8080/yzmall-server",
-                  logLevel: Yzmall_AppM.Dev.value
-              };
-              var rootComponent = Halogen_Component.hoist(Halogen_HTML_Core.bifunctorHTML)(Effect_Aff.functorAff)(Yzmall_AppM.runAppM(environment))(Yzmall_Component_Router.component(Yzmall_AppM.monadAffAppM)(Yzmall_AppM.monadAskAppM(Type_Equality.refl))(Yzmall_AppM.nowAppM)(Yzmall_AppM.logMessagesAppM)(Yzmall_AppM.navigateAppM)(Yzmall_AppM.manageAccountAppM)(Yzmall_AppM.managerCommodityAppM));
-              return Control_Bind.bind(Effect_Aff.bindAff)(Halogen_VDom_Driver.runUI(rootComponent)(initialRoute)(v))(function (v3) {
-                  return Control_Bind.discard(Control_Bind.discardUnit)(Effect_Aff.bindAff)(Data_Functor["void"](Effect_Aff.functorAff)(Effect_Class.liftEffect(Effect_Aff.monadEffectAff)(Routing_Hash.matchesWith(Data_Either.foldableEither)(Routing_Duplex.parse(Yzmall_Data_Route.routeCodec))(function (old) {
-                      return function ($$new) {
-                          return Control_Applicative.when(Effect.applicativeEffect)(Data_Eq.notEq(Data_Maybe.eqMaybe(Yzmall_Data_Route.eqRoute))(old)(new Data_Maybe.Just($$new)))(Effect_Aff.launchAff_(v3.query(Halogen_Query.action(Yzmall_Component_Router.Navigate.create($$new)))));
-                      };
-                  }))))(function () {
-                      return Control_Applicative.pure(Effect_Aff.applicativeAff)(Data_Unit.unit);
+      return Control_Bind.discard(Control_Bind.discardUnit)(Effect_Aff.bindAff)(Effect_Class.liftEffect(Effect_Aff.monadEffectAff)(Yzmall_Page_Utils.initCommodities))(function () {
+          return Control_Bind.bind(Effect_Aff.bindAff)(Effect_Class.liftEffect(Effect_Aff.monadEffectAff)(Effect_Ref["new"](Data_Maybe.Nothing.value)))(function (v1) {
+              return Control_Bind.bind(Effect_Aff.bindAff)(Effect_Class.liftEffect(Effect_Aff.monadEffectAff)(Effect_Ref["new"](Data_Maybe.Nothing.value)))(function (v2) {
+                  return Control_Bind.bind(Effect_Aff.bindAff)(Effect_Class.liftEffect(Effect_Aff.monadEffectAff)(Effect_Ref["new"](Data_Maybe.Nothing.value)))(function (v3) {
+                      return Control_Bind.bind(Effect_Aff.bindAff)(Effect_Class.liftEffect(Effect_Aff.monadEffectAff)(Effect_Ref["new"](Data_Maybe.Nothing.value)))(function (v4) {
+                          return Control_Bind.bind(Effect_Aff.bindAff)(Effect_Class.liftEffect(Effect_Aff.monadEffectAff)(Routing_Hash.getHash))(function (v5) {
+                              return Control_Bind.discard(Control_Bind.discardUnit)(Effect_Aff.bindAff)(Control_Bind.bind(Effect_Aff.bindAff)(Effect_Class.liftEffect(Effect_Aff.monadEffectAff)(tryLogin))(Data_Foldable.traverse_(Effect_Aff.applicativeAff)(Data_Foldable.foldableMaybe)(function (op) {
+                                  return Control_Bind.bind(Effect_Aff.bindAff)(Effect_Aff_Class.liftAff(Effect_Aff_Class.monadAffAff)(Affjax.request(Yzmall_Api_Request.defaultRequest("http://www.scix.vip/yzmall-server")(op))))(function (v6) {
+                                      var u = Control_Bind.bindFlipped(Data_Either.bindEither)(Yzmall_Data_Account.decodeAccount)(Data_Bifunctor.lmap(Data_Either.bifunctorEither)(Affjax_ResponseFormat.printResponseFormatError)(v6.body));
+                                      return Control_Bind.discard(Control_Bind.discardUnit)(Effect_Aff.bindAff)(Effect_Class.liftEffect(Effect_Aff.monadEffectAff)(testLog(u)))(function () {
+                                          return Control_Bind.discard(Control_Bind.discardUnit)(Effect_Aff.bindAff)(Effect_Class.liftEffect(Effect_Aff.monadEffectAff)(Effect_Ref.write(Data_Either.hush(u))(v1)))(function () {
+                                              return Control_Applicative.pure(Effect_Aff.applicativeAff)(Data_Unit.unit);
+                                          });
+                                      });
+                                  });
+                              })))(function () {
+                                  var initialRoute = Data_Either.hush(Routing_Duplex.parse(Yzmall_Data_Route.routeCodec)(v5));
+                                  var environment = {
+                                      currentAccount: v1,
+                                      baseUrl: "http://www.scix.vip/yzmall-server",
+                                      logLevel: Yzmall_AppM.Dev.value,
+                                      currentAddressId: v2,
+                                      currentBankCardId: v3,
+                                      lastRoute: v4
+                                  };
+                                  var rootComponent = Halogen_Component.hoist(Halogen_HTML_Core.bifunctorHTML)(Effect_Aff.functorAff)(Yzmall_AppM.runAppM(environment))(Yzmall_Component_Router.component(Yzmall_AppM.monadAffAppM)(Yzmall_AppM.monadAskAppM(Type_Equality.refl))(Yzmall_AppM.nowAppM)(Yzmall_AppM.logMessagesAppM)(Yzmall_AppM.navigateAppM)(Yzmall_AppM.manageAccountAppM)(Yzmall_AppM.managerCommodityAppM)(Yzmall_AppM.manageOrderAppM)(Yzmall_AppM.manageAddressAppM)(Yzmall_AppM.manageBankCardAppM));
+                                  return Control_Bind.bind(Effect_Aff.bindAff)(Halogen_VDom_Driver.runUI(rootComponent)(initialRoute)(v))(function (v6) {
+                                      return Control_Bind.discard(Control_Bind.discardUnit)(Effect_Aff.bindAff)(Data_Functor["void"](Effect_Aff.functorAff)(Effect_Class.liftEffect(Effect_Aff.monadEffectAff)(Routing_Hash.matchesWith(Data_Either.foldableEither)(Routing_Duplex.parse(Yzmall_Data_Route.routeCodec))(function (old) {
+                                          return function ($$new) {
+                                              return Control_Applicative.when(Effect.applicativeEffect)(Data_Eq.notEq(Data_Maybe.eqMaybe(Yzmall_Data_Route.eqRoute))(old)(new Data_Maybe.Just($$new)))(Effect_Aff.launchAff_(v6.query(Halogen_Query.action(Yzmall_Component_Router.Navigate.create($$new)))));
+                                          };
+                                      }))))(function () {
+                                          return Control_Applicative.pure(Effect_Aff.applicativeAff)(Data_Unit.unit);
+                                      });
+                                  });
+                              });
+                          });
+                      });
                   });
               });
           });
       });
   }));
-  var loginTest = (function () {
-      var loginFields = {
-          phone: "123",
-          password: "123"
-      };
-      var method = Yzmall_Api_Request.Post.create(Data_Maybe.Just.create(Data_Argonaut_Encode_Class.encodeJson(Data_Argonaut_Encode_Class.encodeRecord(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeRecord(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonCons(Data_Argonaut_Encode_Class.encodeJsonJString)(Data_Argonaut_Encode_Class.gEncodeJsonNil)(new Data_Symbol.IsSymbol(function () {
-          return "phone";
-      }))())(new Data_Symbol.IsSymbol(function () {
-          return "password";
-      }))())())(Data_Argonaut_Encode_Class.gEncodeJsonNil)(new Data_Symbol.IsSymbol(function () {
-          return "loginFields";
-      }))())())({
-          loginFields: loginFields
-      })));
-      return Control_Applicative.pure(Effect.applicativeEffect)(new Data_Maybe.Just({
-          endpoint: Yzmall_Api_Endpoint.MyAccountInfo.value,
-          method: Yzmall_Api_Request.Get.value
-      }));
-  })();
   exports["main"] = main;
-  exports["loginTest"] = loginTest;
+  exports["tryLogin"] = tryLogin;
   exports["testLog"] = testLog;
 })(PS["Main"] = PS["Main"] || {});
 PS["Main"].main();

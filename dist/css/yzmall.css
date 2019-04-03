@@ -3,3 +3,39 @@
   background-color: #fff;
   border-color: #929292 #929292 #151515;
 }
+
+.list-group-item-dark.list-group-item-action:focus, .list-group-item-dark.list-group-item-action:hover {
+  color: #fff;
+  background-color: #313030;
+}
+
+.list-group-item.disabled, .list-group-item:disabled {
+  color: #6c757d;
+  background-color: #919191;
+}
+
+
+.list-group-item-dark {
+  color: #fff;
+  background-color: #414040;
+}
+
+
+.payment-bar {
+  clear: both;
+  overflow: hidden;
+  width: 100%;
+  height: 50px;
+  position: fixed;
+  bottom: 75px;
+}
+
+.menuItemActive {
+  background-color: #1d2124;
+  border-color: #171a1d;
+}
+
+.menuItemInactive {
+  background-color: #343a40;
+  border-color: #343a40;
+}
